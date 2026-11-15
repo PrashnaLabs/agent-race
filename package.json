@@ -32,7 +32,7 @@
     "race": "node src/cli.ts view",
     "dev": "vite",
     "build": "vite build",
-    "test": "node --test src/ viewer/",
+    "test": "node --test 'src/**/*.test.ts' 'viewer/**/*.test.ts'",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
