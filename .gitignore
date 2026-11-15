@@ -1,0 +1,6 @@
+node_modules
+dist
+race.json
+.impeccable/
+# built from local session logs: contains private transcript excerpts
+demos/compare.html
