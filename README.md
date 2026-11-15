@@ -15,6 +15,8 @@ The repo is drawn as a city: every file the agents touched is a tile, grouped in
 ## Setup
 
 ```sh
+git clone https://github.com/PrashnaLabs/agent-race.git
+cd agent-race
 pnpm install
 pnpm build      # builds the 3D viewer into dist/
 ```
@@ -180,8 +182,23 @@ A race holds one or two agents (`Race.agents` is a partial record). To support a
 
 Session logs can contain code, file contents and secrets. The viewer server binds to `127.0.0.1` only and nothing is uploaded anywhere. Be careful sharing a file saved with `--out`, since it includes tool arguments and outputs (truncated to 4 KB each).
 
-## Not built yet
+## Roadmap
 
-- Race runner: start both agents on the same task in separate git worktrees
-- Test and cost scoring
+- Race runner: start both agents on the same task in separate git worktrees, so races are head-to-head on identical work
+- Cost in dollars alongside tokens in the report card
 - Share exporter (PNG, GIF, standalone HTML)
+- More agents (adapters are small: see `src/adapters/`)
+
+## Contributing
+
+Issues and PRs are welcome. Before opening a PR, run:
+
+```sh
+pnpm test && pnpm typecheck && pnpm build
+```
+
+Please don't attach real session logs to issues: they can contain code, prompts and secrets. A minimal hand-written JSONL snippet (like the fixtures in `src/adapters.test.ts`) is enough to reproduce parsing bugs.
+
+## License
+
+[MIT](LICENSE) © Prashna Labs

@@ -4,3 +4,6 @@ race.json
 .impeccable/
 # built from local session logs: contains private transcript excerpts
 demos/compare.html
+# demo video build: contains real session file names/prompts
+brag-output*/
+.DS_Store

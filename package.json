@@ -1,8 +1,30 @@
 {
   "name": "agent-race",
   "version": "0.1.0",
+  "description": "Replay Claude Code and Codex sessions on a 3D map of your repo, solo or side by side.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/PrashnaLabs/agent-race.git"
+  },
+  "homepage": "https://github.com/PrashnaLabs/agent-race#readme",
+  "bugs": {
+    "url": "https://github.com/PrashnaLabs/agent-race/issues"
+  },
+  "keywords": [
+    "claude-code",
+    "codex",
+    "coding-agents",
+    "visualization",
+    "three.js",
+    "session-replay"
+  ],
   "private": true,
   "type": "module",
+  "engines": {
+    "node": ">=23.6"
+  },
+  "packageManager": "pnpm@12.18.0",
   "bin": {
     "agent-race": "src/cli.ts"
   },
