@@ -18,6 +18,9 @@ export type RaceEvent = {
   detail?: string;
   tokens?: number; // output tokens of the model turn that produced this event
   ok?: boolean;
+  added?: number; // edits: lines added
+  removed?: number; // edits: lines removed
+  diff?: string; // edits: changed lines, '+'/'-' prefixed (clipped)
   files?: string[]; // repo-relative paths this event read/edited/searched (code map)
 };
 
@@ -54,6 +57,39 @@ export const clip = (s: unknown, n = DETAIL_MAX): string => {
   return str.length > n ? `${str.slice(0, n)}\n… (${str.length - n} more chars)` : str;
 };
 
+const DIFF_MAX = 3_000;
+
+// Lines changed by replacing `before` with `after`: common leading/trailing lines are context, not change.
+export function lineDelta(before: string, after: string): { added: number; removed: number; diff: string } {
+  const a = before ? before.split('\n') : [];
+  const b = after ? after.split('\n') : [];
+  let p = 0;
+  while (p < a.length && p < b.length && a[p] === b[p]) p++;
+  let s = 0;
+  while (s < a.length - p && s < b.length - p && a[a.length - 1 - s] === b[b.length - 1 - s]) s++;
+  const rem = a.slice(p, a.length - s);
+  const add = b.slice(p, b.length - s);
+  return { added: add.length, removed: rem.length, diff: clip([...rem.map((l) => `-${l}`), ...add.map((l) => `+${l}`)].join('\n'), DIFF_MAX) };
+}
+
+// Lines changed by a Codex apply_patch body (`*** Begin Patch` ... `*** End Patch`).
+export function patchDelta(patch: string): { added: number; removed: number; diff: string } {
+  let added = 0;
+  let removed = 0;
+  const keep: string[] = [];
+  for (const l of patch.split('\n')) {
+    if (l.startsWith('*** ')) {
+      if (/^\*\*\* (Update|Add|Delete) File:/.test(l)) keep.push(l.replace(/^\*\*\* /, '@@ '));
+      continue;
+    }
+    if (l.startsWith('+')) added++;
+    else if (l.startsWith('-')) removed++;
+    else continue;
+    keep.push(l);
+  }
+  return { added, removed, diff: clip(keep.join('\n'), DIFF_MAX) };
+}
+
 export const firstLine = (s: string, n = 120): string => {
   const l = s.trim().split('\n')[0] ?? '';
   return l.length > n ? `${l.slice(0, n)}…` : l;
@@ -89,6 +125,7 @@ export function finalize(agent: Agent, file: string, p: Parsed): { meta: AgentMe
     return {
       ...rest,
       summary: strip(e.summary),
+      ...(e.diff ? { diff: strip(e.diff) } : {}),
       ...(files.length ? { files } : {}),
       id: `${agent}-${i}`,
       agent,

@@ -1,7 +1,7 @@
 // ~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl -> RawEvent[]
-import { classifyCmd, clip, firstLine, type Parsed, type RawEvent } from '../race.ts';
+import { classifyCmd, clip, firstLine, patchDelta, type Parsed, type RawEvent } from '../race.ts';
 
-type Tool = Pick<RawEvent, 'kind' | 'tool' | 'summary' | 'detail'>;
+type Tool = Pick<RawEvent, 'kind' | 'tool' | 'summary' | 'detail' | 'added' | 'removed' | 'diff'>;
 
 const FAIL = /Script failed|exited with code [1-9]|Exit code: [1-9]|"exit_code":\s*[1-9]/i;
 
@@ -20,7 +20,11 @@ function tool(name: string, raw: unknown): Tool {
   const detail = clip(src);
   if (name === 'apply_patch' || src.includes('*** Begin Patch')) {
     const files = [...src.matchAll(/\*\*\* (?:Update|Add|Delete) File: ([^\n\\"]+)/g)].map((m) => m[1]);
-    return { kind: 'edit', tool: 'apply_patch', summary: `patch ${files.join(', ')}`, detail };
+    // Inside a JS exec cell the patch is an escaped string literal; unescape before counting lines.
+    let body = src.slice(src.indexOf('*** Begin Patch'));
+    if (!body.includes('\n') || /\\n/.test(body.slice(0, 200))) body = body.replace(/\\n/g, '\n').replace(/\\"/g, '"').replace(/\\t/g, '\t');
+    body = body.slice(0, body.indexOf('*** End Patch') + 1 || undefined);
+    return { kind: 'edit', tool: 'apply_patch', summary: `patch ${files.join(', ')}`, detail, ...patchDelta(body) };
   }
   const cmd = src.match(/"?cmd"?\s*:\s*"((?:[^"\\]|\\.)*)"/)?.[1];
   if (cmd != null) {

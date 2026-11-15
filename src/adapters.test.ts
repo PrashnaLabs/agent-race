@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { parseClaude } from './adapters/claude.ts';
 import { parseCodex } from './adapters/codex.ts';
-import { buildRace, classifyCmd } from './race.ts';
+import { buildRace, classifyCmd, lineDelta, patchDelta } from './race.ts';
 import { fileTracker } from './files.ts';
 
 const jsonl = (...rows: object[]) => rows.map((r) => JSON.stringify(r)).join('\n') + '\nnot json\n';
@@ -94,4 +94,20 @@ test('fileTracker: Claude cd persists, resets on leaving project; Codex per comm
 test('classifyCmd strips env + cd prefixes', () => {
   assert.equal(classifyCmd('FOO=1 cat x').kind, 'read');
   assert.equal(classifyCmd('cd a; cd b && pnpm test').kind, 'bash');
+});
+
+test('lineDelta counts only changed lines; patchDelta counts +/- lines', () => {
+  assert.deepEqual(lineDelta('a\nb\nc', 'a\nB\nc'), { added: 1, removed: 1, diff: '-b\n+B' });
+  assert.equal(lineDelta('', 'x\ny').added, 2);
+  const p = patchDelta('*** Begin Patch\n*** Update File: a.ts\n@@\n ctx\n-old\n+new\n+more\n*** End Patch');
+  assert.deepEqual([p.added, p.removed], [2, 1]);
+  assert.ok(p.diff.startsWith('@@ Update File: a.ts'));
+});
+
+test('adapters attach line counts to edits (incl. escaped patches in Codex exec cells)', () => {
+  const c = parseClaude(jsonl({ type: 'assistant', timestamp: '2026-01-01T00:00:00Z', message: { id: 'm', content: [{ type: 'tool_use', id: 't', name: 'Edit', input: { file_path: '/r/a.ts', old_string: 'x\ny', new_string: 'x\nz\nw' } }] } }));
+  assert.deepEqual([c.events[0].added, c.events[0].removed], [2, 1]);
+  const input = 'const patch = "*** Begin Patch\\n*** Update File: /r/a.ts\\n@@\\n-a\\n+b\\n*** End Patch"; await tools.apply_patch(patch)';
+  const x = parseCodex(jsonl({ type: 'response_item', timestamp: '2026-01-01T00:00:00Z', payload: { type: 'custom_tool_call', name: 'exec', call_id: 'c', input } }));
+  assert.deepEqual([x.events[0].kind, x.events[0].added, x.events[0].removed], ['edit', 1, 1]);
 });

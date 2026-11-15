@@ -1,7 +1,7 @@
 // ~/.claude/projects/<cwd>/<session>.jsonl -> RawEvent[]
-import { classifyCmd, clip, firstLine, type Parsed, type RawEvent } from '../race.ts';
+import { classifyCmd, clip, firstLine, lineDelta, type Parsed, type RawEvent } from '../race.ts';
 
-type Tool = Pick<RawEvent, 'kind' | 'tool' | 'summary' | 'detail'>;
+type Tool = Pick<RawEvent, 'kind' | 'tool' | 'summary' | 'detail' | 'added' | 'removed' | 'diff'>;
 
 const text = (c: unknown): string =>
   typeof c === 'string'
@@ -19,8 +19,24 @@ function tool(name: string, input: Record<string, unknown>): Tool {
     case 'Edit':
     case 'Write':
     case 'MultiEdit':
-    case 'NotebookEdit':
-      return { kind: 'edit', tool: name, summary: `${name} ${s(input.file_path ?? input.notebook_path)}`, detail };
+    case 'NotebookEdit': {
+      // Write replaces the whole file; we don't know what it replaced, so it only counts additions.
+      const pairs: [string, string][] =
+        name === 'Edit' ? [[s(input.old_string), s(input.new_string)]]
+        : name === 'MultiEdit' ? ((input.edits as any[]) ?? []).map((x) => [s(x?.old_string), s(x?.new_string)])
+        : name === 'Write' ? [['', s(input.content)]]
+        : [['', s(input.new_source)]];
+      const d = pairs.map(([a, b]) => lineDelta(a, b));
+      return {
+        kind: 'edit',
+        tool: name,
+        summary: `${name} ${s(input.file_path ?? input.notebook_path)}`,
+        detail,
+        added: d.reduce((n, x) => n + x.added, 0),
+        removed: d.reduce((n, x) => n + x.removed, 0),
+        diff: clip(d.map((x) => x.diff).join('\n'), 3000),
+      };
+    }
     case 'Bash':
       return { ...classifyCmd(s(input.command)), tool: name, detail };
     case 'Grep':
