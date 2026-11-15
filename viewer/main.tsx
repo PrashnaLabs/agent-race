@@ -3,7 +3,8 @@ import { createRoot } from 'react-dom/client';
 import type { Race } from '../src/race.ts';
 import { Scene } from './Scene.tsx';
 import { Hud } from './Hud.tsx';
-import { init, seekBy, toggleLanes, togglePlay, useRace, type Cam } from './store.ts';
+import { init, jumpTo, seekBy, toggleLanes, togglePlay, useRace, type Cam } from './store.ts';
+import { isCheck, isEdit, isError } from './report.ts';
 import './style.css';
 
 const CAMS: Cam[] = ['overview', 'follow', 'top'];
@@ -19,7 +20,12 @@ function App() {
       } else if (e.key === 'ArrowRight') seekBy(0.02);
       else if (e.key === 'ArrowLeft') seekBy(-0.02);
       else if (e.key === 'l' || e.key === 'L') toggleLanes();
-      else if (e.key === 'Escape') s.set({ selected: null, selFile: null });
+      // e / x / t: next edit, error, test run (Shift = previous). r: report card.
+      else if (e.key === 'e' || e.key === 'E') jumpTo(isEdit, e.shiftKey ? -1 : 1);
+      else if (e.key === 'x' || e.key === 'X') jumpTo(isError, e.shiftKey ? -1 : 1);
+      else if (e.key === 't' || e.key === 'T') jumpTo(isCheck, e.shiftKey ? -1 : 1);
+      else if (e.key === 'r' || e.key === 'R') s.set({ report: !s.report, reportSeen: true });
+      else if (e.key === 'Escape') s.set({ selected: null, selFile: null, report: false });
       else if (CAMS[Number(e.key) - 1]) s.set({ cam: CAMS[Number(e.key) - 1] });
     };
     window.addEventListener('keydown', onKey);

@@ -6,10 +6,11 @@ const FULL_W = 64;
 const FULL_H = 38;
 
 export type Rect = { x: number; y: number; w: number; h: number };
-export type Metric = 'touches' | 'tokens' | 'time';
+export type Metric = 'touches' | 'tokens' | 'time' | 'lines';
 // tokens: share of the output tokens of the model response that made this call (split across files it touched)
 // ms: share of the tool call's run time (split across files it touched)
-export type Touch = { t: number; agent: Agent; edit: boolean; ev: RaceEvent; tokens: number; ms: number };
+// added/removed: lines changed by this touch (edits only; split evenly when one edit touches several files)
+export type Touch = { t: number; agent: Agent; edit: boolean; ev: RaceEvent; tokens: number; ms: number; added: number; removed: number };
 export type FileNode = {
   i: number; // instance index
   path: string;
@@ -18,6 +19,8 @@ export type FileNode = {
   editsAt: number[];
   tokAt: number[]; // cumulative estimated output tokens after touches[k]
   msAt: number[]; // cumulative tool time after touches[k]
+  addAt: number[]; // cumulative lines added after touches[k]
+  remAt: number[]; // cumulative lines removed after touches[k]
   first: Partial<Record<Agent, number>>; // first touch time per agent
   weight: number;
   rect: Rect;
@@ -42,6 +45,7 @@ export function metricValue(f: FileNode, n: number, metric: Metric): number {
   if (!n) return 0;
   if (metric === 'tokens') return f.tokAt[n - 1];
   if (metric === 'time') return f.msAt[n - 1];
+  if (metric === 'lines') return f.addAt[n - 1] + f.remAt[n - 1];
   return f.readsAt[n - 1] + 3 * f.editsAt[n - 1];
 }
 
@@ -107,8 +111,8 @@ export function buildCodeMap(events: RaceEvent[], agents: Agent[]): CodeMap {
     for (const path of paths) {
       let f = byPath.get(path);
       if (!f)
-        byPath.set(path, (f = { i: byPath.size, path, touches: [], readsAt: [], editsAt: [], tokAt: [], msAt: [], first: {}, weight: 0, rect: { x: 0, y: 0, w: 0, h: 0 }, runs: [] }));
-      const touch = { t: e.t, agent: e.agent, edit: e.kind === 'edit', ev: e, tokens: 0, ms: e.dur / paths.length };
+        byPath.set(path, (f = { i: byPath.size, path, touches: [], readsAt: [], editsAt: [], tokAt: [], msAt: [], addAt: [], remAt: [], first: {}, weight: 0, rect: { x: 0, y: 0, w: 0, h: 0 }, runs: [] }));
+      const touch = { t: e.t, agent: e.agent, edit: e.kind === 'edit', ev: e, tokens: 0, ms: e.dur / paths.length, added: (e.added ?? 0) / paths.length, removed: (e.removed ?? 0) / paths.length };
       f.touches.push(touch);
       mine.push(touch);
     }
@@ -131,12 +135,14 @@ export function buildCodeMap(events: RaceEvent[], agents: Agent[]): CodeMap {
   }
 
   const files = [...byPath.values()];
-  const max: Record<Metric, number> = { touches: 0, tokens: 0, time: 0 };
+  const max: Record<Metric, number> = { touches: 0, tokens: 0, time: 0, lines: 0 };
   for (const f of files) {
     let r = 0;
     let ed = 0;
     let tok = 0;
     let ms = 0;
+    let add = 0;
+    let rem = 0;
     for (const [k, x] of f.touches.entries()) {
       const last = f.runs.at(-1);
       if (last?.agent === x.agent) last.end = k + 1;
@@ -149,10 +155,12 @@ export function buildCodeMap(events: RaceEvent[], agents: Agent[]): CodeMap {
       f.editsAt.push(ed);
       f.tokAt.push(tok);
       f.msAt.push(ms);
+      f.addAt.push((add += x.added));
+      f.remAt.push((rem += x.removed));
       f.first[x.agent] ??= x.t;
     }
     f.weight = 1 + Math.sqrt(f.touches.length) * 2;
-    for (const m of ['touches', 'tokens', 'time'] as const) max[m] = Math.max(max[m], metricValue(f, f.touches.length, m));
+    for (const m of ['touches', 'tokens', 'time', 'lines'] as const) max[m] = Math.max(max[m], metricValue(f, f.touches.length, m));
   }
 
   const groupMap = new Map<string, Group>();

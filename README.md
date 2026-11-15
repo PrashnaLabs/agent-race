@@ -94,10 +94,14 @@ When stdin is not a terminal (CI, scripts), pass `--claude <file>` and/or `--cod
 | `Esc` | Close the detail panel |
 | Hover a tile | File path, plus touches, tokens and time so far, per agent |
 | Click a tile | Totals, then every read/edit of that file in order with its token and time share; click one to jump there |
-| Height switch | Tile height shows **touches**, **tokens** or **time** (timeline header) |
+| Height switch | Tile height shows **touches**, **lines** changed, **tokens** or **time** (timeline header) |
 | Click a timeline bar (swimlanes) | Full event details: arguments, output, tokens, duration, files, plus "Jump playhead here" |
 | Timeline strip | Click or drag to scrub. In swimlanes: scroll to zoom, drag to pan, double-click to reset |
 | Event-type chips | Show or hide an event type in the timeline |
+| Edits only | Hide files that were only read or searched, leaving just the files that changed |
+| `E` / `X` / `T` (or the jump buttons) | Jump to the next edit / failed call / test-lint-typecheck run and open it. Add `Shift` to go back |
+| `R` / Report button | Session report card: time, steps, files touched/edited, lines added/removed, test runs, failures, tokens, side by side. Opens by itself the first time playback reaches the end. "Copy as Markdown" puts the table on your clipboard |
+| Activity feed (under each scoreboard) | The agent's last few actions, newest first; click one to jump there and open it |
 | Skip idle | Squeeze stretches where nobody did anything (over 45 s) into a short hatched band, on screen and during playback |
 
 Speed buttons go from 1× to 1000×. The default replays the session in about 45 seconds.
@@ -106,10 +110,15 @@ Open a specific moment with a URL hash, for example `http://127.0.0.1:4173/#t=90
 
 ### How to read it
 
-- **Tiles**: orange = Claude Code, blue = Codex. Dark grey-blue = not touched yet at the playhead. Full color = the agent edited it; dimmer = only read or searched. A tile flashes when it is touched, and turns whitish when hovered or selected. (Darker side faces and the glow near the agent lights are just lighting.)
+- **Edited vs read**: edited files stand tall in full color, and a ring ripples out across the map at the moment of each edit (red for a failed call). Edited files glow right after activity and cool down over time, so where the work is happening now stands out.
+- **Lines changed**: every edit carries lines added/removed (Claude's Edit/MultiEdit/Write, Codex's apply_patch), shown as `+12 −3` on file labels, in the scoreboards, tooltips and file panel. Clicking an edit shows the diff in red/green. Write counts the whole file as added, since the old content isn't in the log.
+- **Tests**: test, typecheck and lint runs (pytest, vitest, jest, tsc, eslint, `pnpm test`…) get ✓ / ✗ markers on the timeline. Files that were only read or searched stay as low, grey-tinted slabs. Filenames are always shown for the most-edited files and for whatever each agent is touching right now (highlighted).
+- **What the agent is doing**: the label above each agent reads like `✎ editing app.ts`, `◉ reading todo.js`, `⌕ searching …`, `▶ running pnpm test`, `… thinking`, colored by action type (red on failure). A beam connects the agent to the file it is acting on: thick and glowing for an edit, thin for a read or search.
+- **Tiles**: orange = Claude Code, blue = Codex. Dark grey-blue = not touched yet at the playhead. A tile flashes when it is touched, and turns whitish when hovered or selected. (Darker side faces and the glow near the agent lights are just lighting.)
 - **Shared files stack**: a file touched by both agents becomes a stack of layers in time order, bottom = first. Each layer is one uninterrupted stretch of work by one agent, as thick as that stretch's share of the height metric (touches, tokens or time). So `codex / claude / codex` from the bottom means Codex worked on it, then Claude, then Codex again.
 - **Tile height** (switch in the timeline header), scaled against the busiest file and growing as the replay plays:
   - **touches**: reads + 3 × edits.
+  - **lines**: lines added + removed (edits split their lines evenly across the files they touched).
   - **tokens**: estimated output tokens spent on the file. Logs record tokens per model response, not per file, so each response's output tokens are split evenly across the files its tool calls touched. Responses that touched no files (planning, final answers) aren't counted, which is usually 25–30% of the total. Input tokens (file contents read into context) aren't counted.
   - **time**: how long tool calls on the file ran (call to result). A call touching several files splits its time evenly. Model thinking time isn't included.
 - **Map size** follows the number of files: a session that touched a handful of files gets a small map of tall columns, a big one fills the full map.

@@ -1,7 +1,8 @@
 // 2D timeline under the code map. Compact: scrub strip. Expanded: zoomable swimlanes (wheel zoom, drag pan, click a bar).
 import { useEffect, useRef } from 'react';
 import { KINDS, type RaceEvent } from '../src/race.ts';
-import { AGENT_COLOR, AGENT_NAME, evColor, fmtMs, isFull, useRace } from './store.ts';
+import { AGENT_COLOR, AGENT_NAME, FAIL_COLOR, KIND_COLOR, evColor, fmtMs, isFull, useRace } from './store.ts';
+import { isCheck } from './report.ts';
 
 const TICK_STEPS = [1e3, 5e3, 10e3, 30e3, 60e3, 120e3, 300e3, 600e3, 900e3, 1800e3, 3600e3, 7200e3];
 const AXIS = 20;
@@ -145,6 +146,19 @@ export function Timeline() {
           }
           vw.hits.push([x, y, w, h, e]);
         }
+        // test / typecheck / lint runs: ✓ passed, ✗ failed, pinned to the top of the lane
+        ctx.font = `bold ${full ? 12 : 10}px system-ui, sans-serif`;
+        ctx.textAlign = 'center';
+        for (const e of lanes[a].events) {
+          if (!isCheck(e)) continue;
+          const x = vx(ax.toV(e.t));
+          if (x < LW || x > W) continue;
+          ctx.globalAlpha = e.t <= time ? 1 : 0.35;
+          ctx.fillStyle = e.ok === false ? FAIL_COLOR : KIND_COLOR.edit;
+          ctx.fillText(e.ok === false ? '✗' : '✓', x, top + (full ? 17 : 10));
+        }
+        ctx.textAlign = 'start';
+        ctx.font = '10px ui-monospace, Menlo, monospace';
         ctx.restore();
         ctx.globalAlpha = 1;
       });

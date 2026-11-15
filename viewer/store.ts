@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { agentsIn, type Agent, type AgentMeta, type Kind, type Race, type RaceEvent } from '../src/race.ts';
 import { makeAxis, type Axis } from './axis.ts';
 import { buildCodeMap, type CodeMap, type FileNode, type Metric } from './codemap.ts';
+import { jump } from './report.ts';
 
 export type Cam = 'overview' | 'follow' | 'top';
 
@@ -39,6 +40,10 @@ type State = {
   cam: Cam;
   tlH: number; // timeline panel height in px; tall enough = full swimlanes
   metric: Metric; // what tile height shows
+  editsOnly: boolean; // hide files that were only read
+  report: boolean; // report card open
+  reportSeen: boolean; // auto-opened once at the end of playback
+  byTime: RaceEvent[]; // all agents' events sorted by time (jump keys)
   hidden: Kind[];
   selected: RaceEvent | null;
   selFile: FileNode | null;
@@ -72,6 +77,10 @@ export const useRace = create<State>()((set) => ({
   cam: 'overview',
   tlH: storedTlH(),
   metric: 'touches',
+  editsOnly: false,
+  report: false,
+  reportSeen: false,
+  byTime: [],
   hidden: [],
   selected: null,
   selFile: null,
@@ -109,7 +118,7 @@ export function setCollapse(collapse: boolean) {
 }
 
 export function init(race: Race) {
-  // Deep link: #t=<ms>&cam=overview|follow|top&lanes=1&h=touches|tokens|time
+  // Deep link: #t=<ms>&cam=overview|follow|top&lanes=1&h=touches|lines|tokens|time&edits=1
   const h = new URLSearchParams(location.hash.slice(1));
   const cam = h.get('cam') as Cam | null;
   const agents = agentsIn(race);
@@ -121,13 +130,15 @@ export function init(race: Race) {
     agents,
     meta,
     lanes: lanesOf(race),
+    byTime: [...race.events].sort((a, b) => a.t - b.t),
     map: buildCodeMap(race.events, agents),
     maxMs,
     axis,
     time: Number(h.get('t')) || 0,
     ...(cam && ['overview', 'follow', 'top'].includes(cam) && { cam }),
     ...(h.get('lanes') === '1' && { tlH: tlMax() }),
-    ...(['touches', 'tokens', 'time'].includes(h.get('h') ?? '') && { metric: h.get('h') as Metric }),
+    editsOnly: h.get('edits') === '1',
+    ...(['touches', 'lines', 'tokens', 'time'].includes(h.get('h') ?? '') && { metric: h.get('h') as Metric }),
     // Replay the (idle-collapsed) session in ~45s.
     speed: SPEEDS.find((s) => axis.total / s <= 45_000) ?? SPEEDS.at(-1)!,
   });
@@ -164,6 +175,13 @@ export function seekBy(frac: number) {
   const v = Math.min(s.axis.total, Math.max(0, s.axis.toV(s.time) + frac * s.axis.total));
   s.set({ time: s.axis.toT(v) });
 }
+// Move the playhead to the next/previous event matching `pred` and open it.
+export function jumpTo(pred: (e: RaceEvent) => boolean, dir: 1 | -1) {
+  const s = useRace.getState();
+  const e = jump(s.byTime, s.time, pred, dir);
+  if (e) s.set({ time: e.t, playing: false, selected: e, selFile: null });
+}
+
 export function togglePlay() {
   const s = useRace.getState();
   s.set({ playing: !s.playing, time: !s.playing && s.axis.toV(s.time) >= s.axis.total - 1 ? 0 : s.time });

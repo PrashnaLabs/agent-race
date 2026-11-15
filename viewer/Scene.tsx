@@ -1,4 +1,4 @@
-import { useLayoutEffect, useMemo, useRef, type ComponentRef } from 'react';
+import { useLayoutEffect, useMemo, useRef, useState, type ComponentRef } from 'react';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import { Edges, Html, OrbitControls } from '@react-three/drei';
 import { Bloom, EffectComposer } from '@react-three/postprocessing';
@@ -6,6 +6,7 @@ import * as THREE from 'three';
 import type { Agent } from '../src/race.ts';
 import { metricValue, upper, type FileNode } from './codemap.ts';
 import { AGENT_COLOR, AGENT_NAME, FAIL_COLOR, KIND_COLOR, idxAt, useRace } from './store.ts';
+import { actionText } from './actions.ts';
 
 const BG = '#07090d';
 type OrbitControlsImpl = ComponentRef<typeof OrbitControls>;
@@ -26,7 +27,7 @@ function Driver() {
     const s = useRace.getState();
     if (!s.playing) return;
     const v = s.axis.toV(s.time) + dt * 1000 * s.speed;
-    if (v >= s.axis.total) s.set({ time: s.maxMs, playing: false });
+    if (v >= s.axis.total) s.set({ time: s.maxMs, playing: false, ...(!s.reportSeen && { report: true, reportSeen: true }) });
     else s.set({ time: s.axis.toT(v) });
   }, -2);
   return null;
@@ -70,6 +71,9 @@ const WHITE = new THREE.Color('#ffffff');
 // of layers in time order, each as thick as its share of the height metric.
 const MIN_LAYER = 0.07;
 const SEAM = 0.035; // dark gap between layers so the stack reads as separate changes
+// Read-only files sink to low, grey-tinted slabs so edited files carry the map.
+const READ_H = 0.22;
+const SLATE = new THREE.Color('#3a4256');
 
 function Tiles() {
   const files = useRace((s) => s.map.files);
@@ -90,7 +94,7 @@ function Tiles() {
 
   useFrame((_, dt) => {
     if (!runs.length) return;
-    const { time, speed, axis, selected, selFile, hover, metric } = useRace.getState();
+    const { time, speed, axis, selected, selFile, hover, metric, editsOnly } = useRace.getState();
     const k = 1 - Math.exp(-dt * 8);
     const now = axis.toV(time);
     const flash = 500 * speed; // ~0.5s of real time at any speed
@@ -99,6 +103,8 @@ function Tiles() {
     let n = 0;
     let total = 0;
     let started = 0;
+    let edited = false; // file edited by anyone so far
+    let hide = false;
 
     runs.forEach((r, i) => {
       const f = r.file;
@@ -108,7 +114,9 @@ function Tiles() {
         n = upper(f.touches, time);
         total = metricValue(f, n, metric);
         started = f.runs.filter((x) => x.start < n).length;
-        tileH[f.i] += ((n ? targetHeight(total, max[metric]) : 0.06) - tileH[f.i]) * k;
+        edited = n > 0 && f.editsAt[n - 1] > 0;
+        hide = editsOnly && !edited;
+        tileH[f.i] += ((!n ? 0.06 : edited ? targetHeight(total, max[metric]) : READ_H) - tileH[f.i]) * k;
         base = 0;
       }
       const gap = Math.min(0.18, f.rect.w * 0.2, f.rect.h * 0.2);
@@ -116,6 +124,12 @@ function Tiles() {
       const w = Math.max(f.rect.w - gap * 2, 0.05);
       const d = Math.max(f.rect.h - gap * 2, 0.05);
 
+      if (hide) {
+        tmpS.set(0, 0, 0);
+        ref.current.setMatrixAt(i, tmpM.compose(tmpP.set(cx, 0, cz), tmpQ, tmpS));
+        stackH[f.i] = 0;
+        return;
+      }
       if (r.start >= n) {
         // not reached yet: the bottom run doubles as the flat "untouched" tile
         const ghost = !n && firstRun.has(r);
@@ -137,9 +151,15 @@ function Tiles() {
       base += h;
       stackH[f.i] = base;
 
-      const edited = f.editsAt[upto - 1] - (r.start ? f.editsAt[r.start - 1] : 0) > 0;
-      tmpC.copy(colors[r.agent]).multiplyScalar(edited ? 1 : 0.6);
-      if (now - axis.toV(f.touches[upto - 1].t) < flash) tmpC.multiplyScalar(2.6); // HDR flash -> bloom
+      const runEdited = f.editsAt[upto - 1] - (r.start ? f.editsAt[r.start - 1] : 0) > 0;
+      const recent = now - axis.toV(f.touches[upto - 1].t) < flash;
+      if (!edited) tmpC.copy(colors[r.agent]).lerp(SLATE, 0.65).multiplyScalar(recent ? 1.4 : 0.75);
+      else {
+        // Heat: edited files glow right after activity and cool down over ~5% of the session.
+        const heat = Math.exp(-(now - axis.toV(f.touches[n - 1].t)) / Math.max(axis.total * 0.05, 15_000));
+        tmpC.copy(colors[r.agent]).multiplyScalar((runEdited ? 1 : 0.55) * (0.7 + 0.7 * heat));
+        if (recent) tmpC.multiplyScalar(2.6); // HDR flash -> bloom
+      }
       if (f === selFile || f === hover?.file || selected?.files?.includes(f.path)) tmpC.lerp(WHITE, 0.45).multiplyScalar(1.25);
       ref.current.setColorAt(i, tmpC);
     });
@@ -177,7 +197,124 @@ function Tiles() {
   );
 }
 
+// Most recent edit of a file within its first n touches.
+function lastEditor(f: FileNode, n: number) {
+  for (let k = n - 1; k >= 0; k--) if (f.touches[k].edit) return f.touches[k];
+  return undefined;
+}
+
+// Filename labels: the most-edited files so far, plus whatever each agent is working on right now.
+const MAX_LABELS = 10;
+function FileLabels() {
+  const [shown, setShown] = useState<{ files: FileNode[]; active: Set<FileNode> }>({ files: [], active: new Set() });
+  const key = useRef('');
+  useFrame(() => {
+    const { time, map, agents, lanes, meta, editsOnly } = useRace.getState();
+    const active = new Set<FileNode>();
+    for (const a of agents) {
+      if (time >= meta[a].totalMs) continue;
+      const e = lanes[a].events[idxAt(lanes[a].events, time)];
+      for (const p of e?.files ?? []) {
+        const f = map.byPath.get(p);
+        if (f && !(editsOnly && !f.editsAt[upper(f.touches, time) - 1])) active.add(f);
+      }
+    }
+    const top = map.files
+      .map((f) => ({ f, e: f.editsAt[upper(f.touches, time) - 1] ?? 0 }))
+      .filter((x) => x.e > 0)
+      .sort((x, y) => y.e - x.e)
+      .slice(0, MAX_LABELS)
+      .map((x) => x.f);
+    const files = [...new Set([...active, ...top])];
+    const k = `${files.map((f) => f.i).join(',')}|${[...active].map((f) => f.i).join(',')}`;
+    if (k !== key.current) {
+      key.current = k;
+      setShown({ files, active });
+    }
+  });
+  return (
+    <>
+      {shown.files.map((f) => (
+        <FileLabel key={f.path} f={f} active={shown.active.has(f)} />
+      ))}
+    </>
+  );
+}
+
+function FileLabel({ f, active }: { f: FileNode; active: boolean }) {
+  const g = useRef<THREE.Group>(null!);
+  const dot = useRef<HTMLElement>(null!);
+  const delta = useRef<HTMLElement>(null!);
+  useFrame(() => {
+    const [x, z] = center(f);
+    g.current.position.set(x, (stackH[f.i] ?? 0) + 0.35, z);
+    const n = upper(f.touches, useRace.getState().time);
+    const ed = lastEditor(f, n);
+    if (dot.current) dot.current.style.background = ed ? AGENT_COLOR[ed.agent] : '#64748b';
+    if (delta.current) {
+      const add = Math.round(f.addAt[n - 1] ?? 0);
+      const rem = Math.round(f.remAt[n - 1] ?? 0);
+      const text = add || rem ? `+${add} −${rem}` : '';
+      if (delta.current.textContent !== text) delta.current.textContent = text;
+    }
+  });
+  return (
+    <group ref={g}>
+      <Html center className={active ? 'label3d file active' : 'label3d file'} zIndexRange={[15, 5]}>
+        <i ref={dot} />
+        {f.path.split('/').pop()}
+        <em ref={delta} />
+      </Html>
+    </group>
+  );
+}
+
+// Ring that ripples out across the map at the moment of each edit (agent color) or failed call (red).
+const RINGS = 12;
+function Shockwaves() {
+  const files = useRace((s) => s.map.files);
+  const grow = useRace((s) => Math.max(s.map.size.scale, 0.4) * 9);
+  const edits = useMemo(
+    () =>
+      files
+        .flatMap((f) => f.touches.filter((x) => x.edit || x.ev.ok === false).map((x) => ({ t: x.t, f, color: x.ev.ok === false ? FAIL_COLOR : AGENT_COLOR[x.agent] })))
+        .sort((a, b) => a.t - b.t),
+    [files],
+  );
+  const refs = useRef<THREE.Mesh[]>([]);
+  useFrame(() => {
+    const { time, speed, axis } = useRace.getState();
+    const now = axis.toV(time);
+    const life = 1400 * speed; // ~1.4s of real time
+    let j = 0;
+    for (let i = upper(edits, time) - 1; i >= 0 && j < RINGS; i--) {
+      const age = (now - axis.toV(edits[i].t)) / life;
+      if (age > 1) break;
+      const m = refs.current[j++];
+      const [x, z] = center(edits[i].f);
+      m.visible = true;
+      m.position.set(x, 0.1, z);
+      m.scale.setScalar(0.6 + age * grow);
+      const mat = m.material as THREE.MeshBasicMaterial;
+      mat.color.set(edits[i].color).multiplyScalar(2);
+      mat.opacity = (1 - age) * 0.85;
+    }
+    for (; j < RINGS; j++) if (refs.current[j]) refs.current[j].visible = false;
+  });
+  return (
+    <>
+      {Array.from({ length: RINGS }, (_, i) => (
+        <mesh key={i} ref={(el) => void (el && (refs.current[i] = el))} rotation-x={-Math.PI / 2} visible={false} raycast={() => null}>
+          <ringGeometry args={[0.88, 1, 64]} />
+          <meshBasicMaterial transparent depthWrite={false} toneMapped={false} blending={THREE.AdditiveBlending} />
+        </mesh>
+      ))}
+    </>
+  );
+}
+
 const TRAIL = 14;
+const UP = new THREE.Vector3(0, 1, 0);
 
 function Bot({ agent, offset, labelY }: { agent: Agent; offset: number; labelY: number }) {
   const home = useRace((s) => s.map.size.h / 2 + 3); // waiting spot in front of the map
@@ -190,6 +327,8 @@ function Bot({ agent, offset, labelY }: { agent: Agent; offset: number; labelY: 
   const color = useMemo(() => new THREE.Color(AGENT_COLOR[agent]), [agent]);
   const trail = useMemo(() => new THREE.Line(new THREE.BufferGeometry(), new THREE.LineBasicMaterial({ vertexColors: true, toneMapped: false })), []);
   const last = useRef({ hop: -2, idx: -2, done: false });
+  const beam = useRef<THREE.Mesh>(null!);
+  const byPath = useRace((s) => s.map.byPath);
   const top = (f: FileNode) => {
     const [x, z] = center(f);
     return new THREE.Vector3(x + offset, stackH[f.i] ?? 0, z);
@@ -210,10 +349,27 @@ function Bot({ agent, offset, labelY }: { agent: Agent; offset: number; labelY: 
     const done = time >= meta.totalMs;
     if (label.current && (idx !== last.current.idx || done !== last.current.done)) {
       const e = lane.events[idx];
-      label.current.textContent = done ? `${AGENT_NAME[agent]} · finished` : (e?.summary ?? AGENT_NAME[agent]);
+      label.current.textContent = done ? `${AGENT_NAME[agent]} · finished` : e ? actionText(e) : AGENT_NAME[agent];
       label.current.style.borderColor = e && !done ? (e.ok === false ? FAIL_COLOR : KIND_COLOR[e.kind]) : AGENT_COLOR[agent];
       last.current.idx = idx;
       last.current.done = done;
+    }
+
+    // Beam from the agent to the file it is acting on: thick and bright for edits, thin for reads/searches.
+    const cur = lane.events[idx];
+    const target = !done && cur?.files?.length ? byPath.get(cur.files[0]) : undefined;
+    beam.current.visible = !!target;
+    if (target) {
+      const a = g.current.position;
+      const b = top(target).add(new THREE.Vector3(0, 0.05, 0));
+      const dir = b.clone().sub(a);
+      const len = Math.max(dir.length(), 0.01);
+      const isEdit = cur.kind === 'edit';
+      const r = isEdit ? 0.09 + Math.sin(clock.elapsedTime * 12) * 0.02 : 0.025;
+      beam.current.position.copy(a).addScaledVector(dir, 0.5);
+      beam.current.quaternion.setFromUnitVectors(UP, dir.normalize());
+      beam.current.scale.set(r, len, r);
+      (beam.current.material as THREE.MeshBasicMaterial).color.set(KIND_COLOR[cur.kind]).multiplyScalar(isEdit ? 2.4 : 1);
     }
 
     if (h !== last.current.hop) {
@@ -243,6 +399,10 @@ function Bot({ agent, offset, labelY }: { agent: Agent; offset: number; labelY: 
   return (
     <>
       <primitive object={trail} />
+      <mesh ref={beam} visible={false} raycast={() => null}>
+        <cylinderGeometry args={[1, 1, 1, 10]} />
+        <meshBasicMaterial transparent opacity={0.8} toneMapped={false} />
+      </mesh>
       <group ref={g} position={[offset * 4, 3, home]}>
         <mesh>
           <sphereGeometry args={[0.45, 24, 16]} />
@@ -343,6 +503,8 @@ export function Scene() {
       </mesh>
       <Districts />
       <Tiles />
+      <Shockwaves />
+      <FileLabels />
       <SelectedFile />
       {agents.map((a, i) => (
         <Bot key={a} agent={a} offset={agents.length > 1 ? (i ? 0.5 : -0.5) : 0} labelY={1.1 + i * 0.8} />

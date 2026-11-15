@@ -1,7 +1,9 @@
 import { useEffect, useRef, type CSSProperties } from 'react';
-import { KINDS, type Agent } from '../src/race.ts';
+import { KINDS, type Agent, type RaceEvent } from '../src/race.ts';
 import type { FileNode, Metric } from './codemap.ts';
 import { Timeline } from './Timeline.tsx';
+import { describe } from './actions.ts';
+import { isCheck, isEdit, isError, stats, type Stats } from './report.ts';
 import {
   AGENT_COLOR,
   AGENT_NAME,
@@ -18,6 +20,7 @@ import {
   setCollapse,
   setTlH,
   tlMax,
+  jumpTo,
   toggleLanes,
   togglePlay,
   useRace,
@@ -29,15 +32,21 @@ function fileStats(f: FileNode, agent: Agent, time = Infinity) {
   let n = 0;
   let tokens = 0;
   let ms = 0;
+  let added = 0;
+  let removed = 0;
   for (const x of f.touches)
     if (x.agent === agent && x.t <= time) {
       n++;
       tokens += x.tokens;
       ms += x.ms;
+      added += x.added;
+      removed += x.removed;
     }
-  return { n, tokens, ms };
+  return { n, tokens, ms, added, removed };
 }
-const statLine = (s: ReturnType<typeof fileStats>) => `${s.n} touches · ${fmtTok(s.tokens)} tok · ${fmtDur(s.ms)}`;
+const lines = (a: number, r: number) => `+${Math.round(a)} −${Math.round(r)}`;
+const statLine = (s: ReturnType<typeof fileStats>) =>
+  `${s.n} touches${s.added || s.removed ? ` · ${lines(s.added, s.removed)}` : ''} · ${fmtTok(s.tokens)} tok · ${fmtDur(s.ms)}`;
 
 function AgentCard({ agent, side }: { agent: Agent; side: 'left' | 'right' }) {
   const meta = useRace((s) => s.meta[agent]);
@@ -49,7 +58,16 @@ function AgentCard({ agent, side }: { agent: Agent; side: 'left' | 'right' }) {
   const done = time >= meta.totalMs;
   const won = done && !!other && meta.totalMs <= other.totalMs; // no winner in a solo replay
   const touched = files.filter((f) => (f.first[agent] ?? Infinity) <= time).length;
+  const linesSoFar = { a: 0, r: 0 };
+  for (let j = 0; j <= i; j++) {
+    linesSoFar.a += lane.events[j].added ?? 0;
+    linesSoFar.r += lane.events[j].removed ?? 0;
+  }
   const pct = meta.steps ? ((i + 1) / meta.steps) * 100 : 0;
+  const set = useRace((s) => s.set);
+  // Recent actions, newest first. Thinking is skipped unless it's what's happening right now.
+  const feed: RaceEvent[] = [];
+  for (let j = i; j >= 0 && feed.length < 6; j--) if (j === i || lane.events[j].kind !== 'thinking') feed.push(lane.events[j]);
   return (
     <section className={`card ${side}`} style={{ '--c': AGENT_COLOR[agent] } as CSSProperties} aria-label={`${AGENT_NAME[agent]} progress`}>
       <header>
@@ -71,6 +89,10 @@ function AgentCard({ agent, side }: { agent: Agent; side: 'left' | 'right' }) {
           <small>files</small>
         </div>
         <div>
+          <b className="lines">{lines(linesSoFar.a, linesSoFar.r)}</b>
+          <small>lines</small>
+        </div>
+        <div>
           <b>{(lane.cumTokens[i] ?? 0).toLocaleString()}</b>
           <small>out tokens</small>
         </div>
@@ -78,6 +100,27 @@ function AgentCard({ agent, side }: { agent: Agent; side: 'left' | 'right' }) {
       <div className="bar">
         <i style={{ transform: `scaleX(${pct / 100})` }} />
       </div>
+      {feed.length > 0 && (
+        <ol className="feed" aria-label={`${AGENT_NAME[agent]} recent actions`}>
+          {feed.map((e, k) => {
+            const a = describe(e);
+            return (
+              <li key={e.id} className={k === 0 && !done ? 'now' : undefined}>
+                <button
+                  style={{ '--k': evColor(e) } as CSSProperties}
+                  title={`${fmtMs(e.t)} · ${e.summary}`}
+                  onClick={() => set({ time: e.t, playing: false, selected: e, selFile: null })}
+                >
+                  <span className="ic">{a.icon}</span>
+                  <span className="tx">
+                    <b>{a.verb}</b> {a.target}
+                  </span>
+                </button>
+              </li>
+            );
+          })}
+        </ol>
+      )}
     </section>
   );
 }
@@ -88,6 +131,7 @@ function TimelinePanel() {
   const open = isFull(tlH);
   const agents = useRace((s) => s.agents);
   const metric = useRace((s) => s.metric);
+  const editsOnly = useRace((s) => s.editsOnly);
   const set = useRace((s) => s.set);
   const drag = useRef<{ y: number; h: number } | null>(null);
 
@@ -152,16 +196,18 @@ function TimelinePanel() {
               {AGENT_NAME[a]}
             </span>
           ))}
-          {agents.length > 1 && (
-            <span className="muted" title="A file both agents touched is a stack of layers, bottom = first, one layer per stretch of work by one agent">
-              shared files stack in order
-            </span>
-          )}
+          <span className="muted" title="Edited files stand tall in full color and ripple when edited; files only read or searched stay low and grey. Files both agents touched stack in time order, bottom = first.">
+            tall = edited · grey = read
+          </span>
         </p>
+        <label className="toggle">
+          <input type="checkbox" checked={editsOnly} onChange={(e) => set({ editsOnly: e.target.checked })} />
+          Edits only
+        </label>
         <Segmented<Metric>
           label="Tile height"
           value={metric}
-          options={[['touches', 'Height: touches'], ['tokens', 'tokens'], ['time', 'time']]}
+          options={[['touches', 'Height: touches'], ['lines', 'lines'], ['tokens', 'tokens'], ['time', 'time']]}
           onChange={(metric) => set({ metric })}
         />
         <button className="expand" aria-pressed={open} onClick={toggleLanes}>
@@ -209,7 +255,21 @@ function Controls() {
         <input type="checkbox" checked={collapse} onChange={(e) => setCollapse(e.target.checked)} />
         Skip idle
       </label>
+      <div className="seg jumps" role="group" aria-label="Jump to next">
+        <button title="Next edit (E, Shift+E for previous)" onClick={() => jumpTo(isEdit, 1)}>
+          ✎ next edit
+        </button>
+        <button title="Next failed call (X, Shift+X for previous)" onClick={() => jumpTo(isError, 1)}>
+          ✗ error
+        </button>
+        <button title="Next test / typecheck / lint run (T, Shift+T for previous)" onClick={() => jumpTo(isCheck, 1)}>
+          ✓ test
+        </button>
+      </div>
       <Segmented<Cam> label="Camera" value={cam} options={[['overview', 'Overview'], ['follow', 'Follow'], ['top', 'Top']]} onChange={(cam) => set({ cam })} />
+      <button className="reportbtn" onClick={() => set({ report: true, reportSeen: true })}>
+        Report
+      </button>
     </footer>
   );
 }
@@ -262,7 +322,17 @@ function EventDetail() {
       <button className="jump" onClick={() => set({ time: e.t, playing: false })}>
         Jump playhead here
       </button>
-      {e.detail && <pre>{e.detail}</pre>}
+      {e.diff && (
+        <pre className="diff" aria-label={`Diff ${lines(e.added ?? 0, e.removed ?? 0)}`}>
+          {e.diff.split('\n').map((l, k) => (
+            <span key={k} className={l.startsWith('+') ? 'add' : l.startsWith('-') ? 'del' : 'hunk'}>
+              {l}
+              {'\n'}
+            </span>
+          ))}
+        </pre>
+      )}
+      {e.detail && <pre className={e.diff ? 'raw' : undefined}>{e.detail}</pre>}
     </aside>
   );
 }
@@ -313,6 +383,8 @@ function FileDetail() {
         <dd>~{fmtTok(f.tokAt.at(-1) ?? 0)} output (est.)</dd>
         <dt>time</dt>
         <dd>{fmtDur(f.msAt.at(-1) ?? 0)} in tool calls</dd>
+        <dt>lines</dt>
+        <dd>{lines(f.addAt.at(-1) ?? 0, f.remAt.at(-1) ?? 0)}</dd>
         {agents.map((a) => (
           <FileAgentRow key={a} f={f} agent={a} />
         ))}
@@ -329,7 +401,7 @@ function FileDetail() {
               </span>
               <span className="sum">{x.ev.summary}</span>
               <span className="cost">
-                {fmtTok(x.tokens)} · {fmtDur(x.ms)}
+                {x.edit ? lines(x.added, x.removed) : `${fmtTok(x.tokens)} · ${fmtDur(x.ms)}`}
               </span>
             </button>
           </li>
@@ -371,6 +443,84 @@ function Tooltip() {
   );
 }
 
+// Side-by-side outcome of the session(s) at the end of playback. Lower is better for time, steps, errors, tokens.
+const ROWS: { key: keyof Stats; label: string; fmt: (v: number) => string; better?: 'low' }[] = [
+  { key: 'ms', label: 'Active time', fmt: fmtMs, better: 'low' },
+  { key: 'steps', label: 'Steps', fmt: String, better: 'low' },
+  { key: 'filesTouched', label: 'Files touched', fmt: String },
+  { key: 'filesEdited', label: 'Files edited', fmt: String },
+  { key: 'added', label: 'Lines added', fmt: (v) => `+${Math.round(v)}` },
+  { key: 'removed', label: 'Lines removed', fmt: (v) => `−${Math.round(v)}` },
+  { key: 'checks', label: 'Test / lint runs', fmt: String },
+  { key: 'checksFailed', label: 'Failed test runs', fmt: String, better: 'low' },
+  { key: 'errors', label: 'Failed calls', fmt: String, better: 'low' },
+  { key: 'tokens', label: 'Output tokens', fmt: (v) => v.toLocaleString(), better: 'low' },
+];
+
+function Report() {
+  const open = useRace((s) => s.report);
+  const agents = useRace((s) => s.agents);
+  const lanes = useRace((s) => s.lanes);
+  const map = useRace((s) => s.map);
+  const set = useRace((s) => s.set);
+  if (!open) return null;
+  const all = agents.map((a) => ({ a, s: stats(lanes[a].events, map, a) }));
+  const best = (r: (typeof ROWS)[number]) =>
+    r.better && all.length > 1 ? Math.min(...all.map((x) => x.s[r.key])) : undefined;
+  const markdown = [
+    `| | ${agents.map((a) => AGENT_NAME[a]).join(' | ')} |`,
+    `|---|${agents.map(() => '---').join('|')}|`,
+    ...ROWS.map((r) => `| ${r.label} | ${all.map((x) => r.fmt(x.s[r.key])).join(' | ')} |`),
+  ].join('\n');
+  return (
+    <div className="overlay" role="dialog" aria-modal="true" aria-label="Session report" onClick={() => set({ report: false })}>
+      <section className="report" onClick={(e) => e.stopPropagation()}>
+        <header>
+          <h2>Session report</h2>
+          <button className="x" aria-label="Close" onClick={() => set({ report: false })}>
+            ×
+          </button>
+        </header>
+        <table>
+          <thead>
+            <tr>
+              <th />
+              {agents.map((a) => (
+                <th key={a} style={{ color: AGENT_COLOR[a] }}>
+                  {AGENT_NAME[a]}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {ROWS.map((r) => {
+              const b = best(r);
+              return (
+                <tr key={r.key}>
+                  <th scope="row">{r.label}</th>
+                  {all.map((x) => (
+                    <td key={x.a} className={b != null && x.s[r.key] === b ? 'best' : undefined}>
+                      {r.fmt(x.s[r.key])}
+                    </td>
+                  ))}
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+        <p className="note">
+          Highlighted = better (lower) where it makes sense. Tests are detected from command names (test, pytest, vitest, tsc, lint…).
+        </p>
+        <footer>
+          <button className="jump" onClick={() => navigator.clipboard?.writeText(markdown)}>
+            Copy as Markdown
+          </button>
+        </footer>
+      </section>
+    </div>
+  );
+}
+
 export function Hud() {
   const agents = useRace((s) => s.agents);
   return (
@@ -385,7 +535,8 @@ export function Hud() {
       <TimelinePanel />
       <Tooltip />
       <Controls />
-      <p className="keys">space play · ←/→ seek · 1 2 3 camera · L swimlanes · esc close</p>
+      <Report />
+      <p className="keys">space play · ←/→ seek · E/X/T next edit/error/test · R report · L swimlanes · esc close</p>
     </>
   );
 }

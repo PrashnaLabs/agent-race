@@ -72,3 +72,56 @@ test('files touched by both agents split into time-ordered runs', () => {
   assert.deepEqual(f.runs.map((r) => [r.agent, r.start, r.end]), [['codex', 0, 2], ['claude', 2, 4], ['codex', 4, 5]]);
   assert.equal(m.runs.length, 3);
 });
+
+test('actions describe what the agent is doing', async () => {
+  const { actionText } = await import('./actions.ts');
+  const ev = (kind: RaceEvent['kind'], summary: string, extra: Partial<RaceEvent> = {}): RaceEvent =>
+    ({ id: 'x', agent: 'claude', t: 0, dur: 0, step: 0, kind, summary, ...extra });
+  assert.equal(actionText(ev('edit', 'Edit src/app.ts', { files: ['src/app.ts'] })), '✎ editing app.ts');
+  assert.equal(actionText(ev('read', '$ cat a b', { files: ['src/a.ts', 'src/b.ts'] })), '◉ reading a.ts +1');
+  assert.equal(actionText(ev('search', 'Grep highlight(')), '⌕ searching highlight(');
+  assert.equal(actionText(ev('bash', '$ pnpm test')), '▶ running pnpm test');
+  assert.equal(actionText(ev('thinking', 'thinking')), '… thinking');
+});
+
+test('lines metric sums lines added + removed per file, split across multi-file edits', () => {
+  const ev = (step: number, files: string[], added: number, removed: number): RaceEvent =>
+    ({ id: `c${step}`, agent: 'claude', t: step, dur: 1, step, kind: 'edit', summary: '', files, added, removed });
+  const m = buildCodeMap([ev(0, ['a.ts'], 10, 2), ev(1, ['a.ts', 'b.ts'], 4, 4)], ['claude']);
+  assert.equal(metricValue(m.byPath.get('a.ts')!, 2, 'lines'), 12 + 4);
+  assert.equal(metricValue(m.byPath.get('b.ts')!, 1, 'lines'), 4);
+  assert.equal(m.max.lines, 16);
+});
+
+test('report stats and jump lookups', async () => {
+  const { stats, jump, isCheck, isEdit, isError } = await import('./report.ts');
+  const ev = (t: number, kind: RaceEvent['kind'], extra: Partial<RaceEvent> = {}): RaceEvent =>
+    ({ id: `e${t}`, agent: 'claude', t, dur: 10, step: t, kind, summary: '', ...extra });
+  const events = [
+    ev(0, 'read', { files: ['a.ts'] }),
+    ev(100, 'edit', { files: ['a.ts'], added: 5, removed: 1, tokens: 50 }),
+    ev(200, 'bash', { summary: '$ pnpm test', ok: false }),
+    ev(300, 'bash', { summary: '$ pnpm test', ok: true }),
+    ev(400, 'edit', { files: ['b.ts'], added: 2, removed: 0 }),
+  ];
+  const map = buildCodeMap(events, ['claude']);
+  const s = stats(events, map, 'claude');
+  assert.deepEqual(
+    [s.steps, s.filesTouched, s.filesEdited, s.added, s.removed, s.errors, s.checks, s.checksFailed, s.tokens, s.ms],
+    [5, 2, 2, 7, 1, 1, 2, 1, 50, 410],
+  );
+  assert.equal(stats(events, map, 'claude', 150).filesEdited, 1); // playhead-aware
+  assert.ok(isCheck(events[2]) && !isCheck(ev(0, 'bash', { summary: '$ ls' })));
+  assert.equal(jump(events, 100, isEdit, 1)?.t, 400);
+  assert.equal(jump(events, 400, isEdit, -1)?.t, 100);
+  assert.equal(jump(events, 250, isError, 1), undefined);
+});
+
+test('isCheck matches test/lint runners as commands, not test file names', async () => {
+  const { isCheck } = await import('./report.ts');
+  const b = (summary: string): RaceEvent => ({ id: 'b', agent: 'claude', t: 0, dur: 0, step: 0, kind: 'bash', summary });
+  for (const yes of ['$ pnpm test', '$ pnpm exec vitest run src/app', '$ uv run pytest tests/unit -q', '$ npx tsc --noEmit', '$ go test ./...', '$ npm run lint'])
+    assert.ok(isCheck(b(yes)), yes);
+  for (const no of ['$ grep -n x src/app/globals.contrast.test.ts', '$ cat jest.config.js', '$ ls tests/', '$ git status'])
+    assert.ok(!isCheck(b(no)), no);
+});
