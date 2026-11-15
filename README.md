@@ -4,6 +4,11 @@ Replay a Claude Code or Codex session on a 3D map of the repo, or put one of eac
 
 The repo is drawn as a city: every file the agents touched is a tile, grouped into folder districts. Tiles rise as they are read and edited, colored by who touched them. Each agent is a glowing light that hops from file to file, leaving a trail. Under the map, a timeline shows every step (thinking, messages, reads, searches, edits, shell commands, tool calls) and expands into full swimlanes.
 
+<p align="center">
+  <a href="docs/agent-race-demo.mp4"><img src="docs/agent-race-demo.gif" alt="Agent Race replaying a Claude Code session: files rise on a 3D map of the repo as the agent reads and edits them, with a timeline of every step below" width="800"></a>
+</p>
+<p align="center"><a href="docs/agent-race-demo.mp4"><b>▶ Watch the demo (21 s)</b></a> (a real Claude Code session: the one that built this tool)</p>
+
 ## Requirements
 
 - Node.js 23.6 or newer (the CLI runs TypeScript directly via Node's built-in type stripping)
