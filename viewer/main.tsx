@@ -25,6 +25,7 @@ function App() {
       else if (e.key === 'x' || e.key === 'X') jumpTo(isError, e.shiftKey ? -1 : 1);
       else if (e.key === 't' || e.key === 'T') jumpTo(isCheck, e.shiftKey ? -1 : 1);
       else if (e.key === 'r' || e.key === 'R') s.set({ report: !s.report, reportSeen: true });
+      else if (e.key === 'c' || e.key === 'C') jumpTo((x) => s.chapterIds.has(x.id), e.shiftKey ? -1 : 1);
       else if (e.key === 'Escape') s.set({ selected: null, selFile: null, report: false });
       else if (CAMS[Number(e.key) - 1]) s.set({ cam: CAMS[Number(e.key) - 1] });
     };

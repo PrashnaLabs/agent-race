@@ -100,6 +100,8 @@ When stdin is not a terminal (CI, scripts), pass `--claude <file>` and/or `--cod
 | Event-type chips | Show or hide an event type in the timeline |
 | Edits only | Hide files that were only read or searched, leaving just the files that changed |
 | `E` / `X` / `T` (or the jump buttons) | Jump to the next edit / failed call / test-lint-typecheck run and open it. Add `Shift` to go back |
+| `C` | Jump to the next chapter (a prompt you typed or a git commit). `Shift+C` goes back |
+| Chapter flags (row above the lanes) | Hover for the full prompt / commit message, click to jump there |
 | `R` / Report button | Session report card: time, steps, files touched/edited, lines added/removed, test runs, failures, tokens, side by side. Opens by itself the first time playback reaches the end. "Copy as Markdown" puts the table on your clipboard |
 | Activity feed (under each scoreboard) | The agent's last few actions, newest first; click one to jump there and open it |
 | Skip idle | Squeeze stretches where nobody did anything (over 45 s) into a short hatched band, on screen and during playback |
@@ -122,6 +124,7 @@ Shots hold for about 2.5 s so the camera doesn't jitter; a new edit or failure c
 
 - **Edited vs read**: edited files stand tall in full color, and a ring ripples out across the map at the moment of each edit (red for a failed call). Edited files glow right after activity and cool down over time, so where the work is happening now stands out.
 - **Lines changed**: every edit carries lines added/removed (Claude's Edit/MultiEdit/Write, Codex's apply_patch), shown as `+12 −3` on file labels, in the scoreboards, tooltips and file panel. Clicking an edit shows the diff in red/green. Write counts the whole file as added, since the old content isn't in the log.
+- **Chapters**: every prompt you typed (yellow ▸) and every successful `git commit` (green ◆, with its message from `-m` or a heredoc) gets a flag above the timeline lanes, and a banner shows on the map for a few seconds as the playhead passes it. Messages that tools inject as user turns (e.g. agent-status notifications) count as prompts too.
 - **Tests**: test, typecheck and lint runs (pytest, vitest, jest, tsc, eslint, `pnpm test`…) get ✓ / ✗ markers on the timeline. Files that were only read or searched stay as low, grey-tinted slabs. Filenames are always shown for the most-edited files and for whatever each agent is touching right now (highlighted).
 - **What the agent is doing**: the label above each agent reads like `✎ editing app.ts`, `◉ reading todo.js`, `⌕ searching …`, `▶ running pnpm test`, `… thinking`, colored by action type (red on failure). A beam connects the agent to the file it is acting on: thick and glowing for an edit, thin for a read or search.
 - **Tiles**: orange = Claude Code, blue = Codex. Dark grey-blue = not touched yet at the playhead. A tile flashes when it is touched, and turns whitish when hovered or selected. (Darker side faces and the glow near the agent lights are just lighting.)

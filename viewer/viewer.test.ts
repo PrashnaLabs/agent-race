@@ -143,3 +143,20 @@ test('director picks close-up / two-shot / wide from current actions', async () 
   assert.deepEqual([two.kind, two.x], ['two', 10]);
   assert.equal(pickShot([f('claude', 0, 3), f('codex', 2, 3)], 6).kind, 'close'); // too close for a two-shot
 });
+
+test('chapters: prompts and successful git commits with their messages', async () => {
+  const { chapters, commitMessage } = await import('./chapters.ts');
+  assert.equal(commitMessage('git add . && git commit -m "feat: add todo app" && git log'), 'feat: add todo app');
+  assert.equal(commitMessage("git commit -m 'fix: x' -m 'body'"), 'fix: x');
+  assert.equal(commitMessage('git commit -m "$(cat <<\'EOF\'\nfeat: heredoc title\n\nbody\nEOF\n)"'), 'feat: heredoc title');
+  assert.equal(commitMessage('git commit --amend --no-edit'), '(no message)');
+  assert.equal(commitMessage('git status'), undefined);
+  const ev = (t: number, kind: RaceEvent['kind'], extra: Partial<RaceEvent>): RaceEvent =>
+    ({ id: `e${t}`, agent: 'codex', t, dur: 0, step: t, kind, summary: '', ...extra });
+  const cs = chapters([
+    ev(5, 'bash', { summary: '$ git commit -m "b"', detail: JSON.stringify({ cmd: 'git commit -m "b"' }), ok: true }),
+    ev(1, 'user', { summary: 'build a todo app' }),
+    ev(9, 'bash', { summary: '$ git commit -m "c"', ok: false }), // failed commit: not a chapter
+  ]);
+  assert.deepEqual(cs.map((c) => [c.kind, c.title]), [['prompt', 'build a todo app'], ['commit', 'b']]);
+});

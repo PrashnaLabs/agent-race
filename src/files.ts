@@ -16,7 +16,7 @@ const join = (dir: string, p: string): string | undefined => {
 };
 
 // The shell command string inside the tool input JSON (Claude: "command", Codex: "cmd").
-function commandOf(input: string): string {
+export function commandOf(input: string): string {
   const m = input.match(/"?(?:command|cmd)"?\s*:\s*"((?:[^"\\]|\\.)*)"/)?.[1];
   if (m == null) return '';
   try {

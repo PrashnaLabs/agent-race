@@ -526,6 +526,29 @@ function Report() {
   );
 }
 
+// Banner for ~4s of real time after the playhead passes a prompt or commit.
+function ChapterToast() {
+  const time = useRace((s) => s.time);
+  const chapters = useRace((s) => s.chapters);
+  const axis = useRace((s) => s.axis);
+  const speed = useRace((s) => s.speed);
+  let c = undefined;
+  for (let k = chapters.length - 1; k >= 0; k--)
+    if (chapters[k].t <= time) {
+      c = chapters[k];
+      break;
+    }
+  if (!c || axis.toV(time) - axis.toV(c.t) > 4000 * speed) return null;
+  const commit = c.kind === 'commit';
+  return (
+    <p className={commit ? 'toast commit' : 'toast'} role="status">
+      <b>{commit ? '◆' : '▸'}</b>
+      <span style={{ color: AGENT_COLOR[c.agent] }}>{commit ? `${AGENT_NAME[c.agent]} committed` : `You → ${AGENT_NAME[c.agent]}`}</span>
+      <span className="msg">{c.title}</span>
+    </p>
+  );
+}
+
 function ShotCaption() {
   const cam = useRace((s) => s.cam);
   const shot = useRace((s) => s.shot);
@@ -553,7 +576,8 @@ export function Hud() {
       <Controls />
       <Report />
       <ShotCaption />
-      <p className="keys">space play · ←/→ seek · 1–4 camera · E/X/T next edit/error/test · R report · L swimlanes · esc close</p>
+      <ChapterToast />
+      <p className="keys">space play · ←/→ seek · 1–4 camera · E/X/T/C next edit/error/test/chapter · R report · L swimlanes · esc close</p>
     </>
   );
 }

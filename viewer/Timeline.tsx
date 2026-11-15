@@ -3,14 +3,16 @@ import { useEffect, useRef } from 'react';
 import { KINDS, type RaceEvent } from '../src/race.ts';
 import { AGENT_COLOR, AGENT_NAME, FAIL_COLOR, KIND_COLOR, evColor, fmtMs, isFull, useRace } from './store.ts';
 import { isCheck } from './report.ts';
+import type { Chapter } from './chapters.ts';
 
 const TICK_STEPS = [1e3, 5e3, 10e3, 30e3, 60e3, 120e3, 300e3, 600e3, 900e3, 1800e3, 3600e3, 7200e3];
 const AXIS = 20;
+const CHAPTER_ROW = 16; // flag row for prompts / commits, between the time axis and the lanes
 type Hit = [x: number, y: number, w: number, h: number, e: RaceEvent];
 
 export function Timeline() {
   const ref = useRef<HTMLCanvasElement>(null!);
-  const view = useRef({ v0: 0, v1: 1, hits: [] as Hit[], drag: null as null | { x: number; v0: number; v1: number; moved: boolean } });
+  const view = useRef({ v0: 0, v1: 1, hits: [] as Hit[], flags: [] as [x: number, w: number, c: Chapter][], drag: null as null | { x: number; v0: number; v1: number; moved: boolean } });
   const open = useRace((s) => isFull(s.tlH));
   const axis = useRace((s) => s.axis);
 
@@ -50,7 +52,8 @@ export function Timeline() {
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       ctx.clearRect(0, 0, W, H);
       const LW = labelW();
-      const laneH = (H - AXIS - 4) / agents.length;
+      const AX = AXIS + (s.chapters.length ? CHAPTER_ROW : 0); // lanes start below the flags
+      const laneH = (H - AX - 4) / agents.length;
       const head = full ? 20 : 3;
       const rowH = (laneH - head - 4) / KINDS.length;
       vw.hits = [];
@@ -97,7 +100,7 @@ export function Timeline() {
       ctx.restore();
 
       agents.forEach((a, li) => {
-        const top = AXIS + 2 + li * laneH;
+        const top = AX + 2 + li * laneH;
         ctx.fillStyle = li % 2 ? 'rgba(255,255,255,0.015)' : 'rgba(255,255,255,0.03)';
         ctx.fillRect(0, top, W, laneH - 2);
         // vertical name, centered in the lane (short form when the lane is too short)
@@ -163,6 +166,44 @@ export function Timeline() {
         ctx.globalAlpha = 1;
       });
 
+      // chapter flags: ▸ prompts (yellow), ◆ commits (green); label until the next flag
+      vw.flags = [];
+      const cs = s.chapters;
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(LW, AXIS, W - LW, H - AXIS);
+      ctx.clip();
+      cs.forEach((c, k) => {
+        const x = vx(ax.toV(c.t));
+        if (x < LW - 2 || x > W) return;
+        const nextX = k + 1 < cs.length ? vx(ax.toV(cs[k + 1].t)) : W;
+        const color = c.kind === 'commit' ? KIND_COLOR.edit : KIND_COLOR.user;
+        const past = c.t <= time;
+        ctx.globalAlpha = past ? 0.22 : 0.1;
+        ctx.fillStyle = color;
+        ctx.fillRect(x, AXIS + 2, 1, H - AXIS - 2); // pole through the lanes
+        ctx.globalAlpha = past ? 1 : 0.45;
+        ctx.beginPath();
+        ctx.moveTo(x, AXIS + 2);
+        ctx.lineTo(x + 8, AXIS + 5.5);
+        ctx.lineTo(x, AXIS + 9);
+        ctx.fill();
+        const room = nextX - x - 14;
+        let w = 10;
+        if (room > 30) {
+          ctx.font = '10px ui-monospace, Menlo, monospace';
+          const label = `${c.kind === 'commit' ? '◆' : '▸'} ${AGENT_NAME[c.agent].split(' ')[0]}: ${c.title}`;
+          let text = label;
+          while (text.length > 4 && ctx.measureText(text).width > room) text = `${text.slice(0, -2)}…`;
+          ctx.fillStyle = past ? '#cbd5e1' : '#64748b';
+          ctx.fillText(text, x + 11, AXIS + 11);
+          w = 11 + ctx.measureText(text).width;
+        }
+        vw.flags.push([x, w, c]);
+      });
+      ctx.restore();
+      ctx.globalAlpha = 1;
+
       const px = vx(ax.toV(time));
       if (px >= LW) {
         ctx.fillStyle = '#fff';
@@ -195,7 +236,14 @@ export function Timeline() {
     };
     const fullNow = () => isFull(useRace.getState().tlH);
 
+    const flagAt = (x: number, y: number) =>
+      y >= AXIS && y <= AXIS + CHAPTER_ROW ? vw.flags.find(([fx, w]) => x >= fx - 3 && x <= fx + w)?.[2] : undefined;
     const down = (ev: PointerEvent) => {
+      const c = flagAt(ev.offsetX, ev.offsetY);
+      if (c) {
+        useRace.getState().set({ time: c.t, playing: false, selected: c.ev, selFile: null });
+        return;
+      }
       el.setPointerCapture(ev.pointerId);
       vw.drag = { x: ev.offsetX, v0: vw.v0, v1: vw.v1, moved: false };
       if (!fullNow()) scrubTo(ev.offsetX);
@@ -213,7 +261,8 @@ export function Timeline() {
         } else scrubTo(ev.offsetX);
         return;
       }
-      const e = hitAt(ev.offsetX, ev.offsetY);
+      const e = flagAt(ev.offsetX, ev.offsetY)?.ev ?? hitAt(ev.offsetX, ev.offsetY);
+      el.style.cursor = flagAt(ev.offsetX, ev.offsetY) ? 'pointer' : '';
       useRace.getState().set({ hover: e ? { ev: e, x: ev.clientX, y: ev.clientY } : null });
     };
     const up = (ev: PointerEvent) => {

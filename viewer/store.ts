@@ -3,6 +3,7 @@ import { agentsIn, type Agent, type AgentMeta, type Kind, type Race, type RaceEv
 import { makeAxis, type Axis } from './axis.ts';
 import { buildCodeMap, type CodeMap, type FileNode, type Metric } from './codemap.ts';
 import { jump } from './report.ts';
+import { chapters, type Chapter } from './chapters.ts';
 
 export type Cam = 'overview' | 'follow' | 'top' | 'director';
 
@@ -45,6 +46,8 @@ type State = {
   reportSeen: boolean; // auto-opened once at the end of playback
   byTime: RaceEvent[]; // all agents' events sorted by time (jump keys)
   shot: string; // director camera caption
+  chapters: Chapter[]; // prompts + git commits, by time
+  chapterIds: Set<string>; // event ids that are chapters (C key)
   hidden: Kind[];
   selected: RaceEvent | null;
   selFile: FileNode | null;
@@ -83,6 +86,8 @@ export const useRace = create<State>()((set) => ({
   reportSeen: false,
   byTime: [],
   shot: '',
+  chapters: [],
+  chapterIds: new Set(),
   hidden: [],
   selected: null,
   selFile: null,
@@ -133,6 +138,10 @@ export function init(race: Race) {
     meta,
     lanes: lanesOf(race),
     byTime: [...race.events].sort((a, b) => a.t - b.t),
+    ...(() => {
+      const cs = chapters(race.events);
+      return { chapters: cs, chapterIds: new Set(cs.map((c) => c.ev.id)) };
+    })(),
     map: buildCodeMap(race.events, agents),
     maxMs,
     axis,

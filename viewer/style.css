@@ -102,6 +102,14 @@ button:focus-visible, input:focus-visible { outline: 2px solid #7dd3fc; outline-
 .report td { font-family: var(--mono); font-variant-numeric: tabular-nums; }
 .report td.best { color: #86efac; font-weight: 700; }
 .report .note { margin: 0 0 12px; color: var(--muted); font-size: 11px; }
+.toast { position: fixed; top: 64px; left: 50%; translate: -50% 0; margin: 0; z-index: 3; display: flex; align-items: baseline; gap: 8px; max-width: min(680px, calc(100% - 420px)); padding: 7px 14px; border-radius: 10px; background: rgb(14 19 28 / 0.92); border: 1px solid rgb(250 204 21 / 0.5); font-size: 13px; animation: toast-in 0.25s ease-out; }
+.toast.commit { border-color: rgb(74 222 128 / 0.55); }
+.toast b { color: #facc15; }
+.toast.commit b { color: #4ade80; }
+.toast span { white-space: nowrap; font-weight: 600; }
+.toast .msg { font-weight: 400; color: var(--text); overflow: hidden; text-overflow: ellipsis; }
+@keyframes toast-in { from { opacity: 0; translate: -50% -6px; } }
+@media (prefers-reduced-motion: reduce) { .toast { animation: none; } }
 .shotcap { position: fixed; top: 30px; left: 50%; translate: -50% 0; margin: 0; padding: 4px 12px; border-radius: 99px; background: rgb(7 9 13 / 0.8); border: 1px solid var(--line); font: 12px var(--mono); color: var(--text); white-space: nowrap; max-width: calc(100% - 420px); overflow: hidden; text-overflow: ellipsis; z-index: 3; }
 .keys { position: fixed; top: 10px; left: 50%; translate: -50% 0; margin: 0; color: var(--muted); font-size: 11px; pointer-events: none; white-space: nowrap; }
 
