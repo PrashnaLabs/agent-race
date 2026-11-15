@@ -88,7 +88,7 @@ When stdin is not a terminal (CI, scripts), pass `--claude <file>` and/or `--cod
 | --- | --- |
 | `Space` | Play / pause |
 | `←` / `→` | Seek back / forward |
-| `1` `2` `3` | Camera: **Overview** (drag to orbit, scroll to zoom), **Follow** (tracks the agents), **Top** (straight down) |
+| `1` `2` `3` `4` | Camera: **Overview** (drag to orbit, scroll to zoom), **Follow** (tracks the agents), **Top** (straight down), **Director** (cuts to the action automatically) |
 | `L` | Expand / collapse the timeline into full swimlanes |
 | Timeline grip (top edge) | Drag to resize the timeline (or focus it and use ↑/↓; double-click toggles). Taller than ~320px it becomes full swimlanes. The height is remembered in this browser |
 | `Esc` | Close the detail panel |
@@ -107,6 +107,16 @@ When stdin is not a terminal (CI, scripts), pass `--claude <file>` and/or `--cod
 Speed buttons go from 1× to 1000×. The default replays the session in about 45 seconds.
 
 Open a specific moment with a URL hash, for example `http://127.0.0.1:4173/#t=900000&cam=follow&lanes=1&h=tokens` (`t` is in milliseconds). The hash is read on page load.
+
+### Director camera
+
+Press `4` (or **Director**) and the camera picks shots by itself, with a caption saying what it's showing:
+
+- **Close-up** on the file of the most important thing happening: an edit or a failed call first, then a test run, then a read or search. It orbits slowly.
+- **Two-shot** framing both agents when they're doing equally important work in different parts of the repo.
+- **Wide** on the whole codebase while nobody is touching files (thinking, messages).
+
+Shots hold for about 2.5 s so the camera doesn't jitter; a new edit or failure can cut in after 0.8 s. Good for demos and screen recordings.
 
 ### How to read it
 

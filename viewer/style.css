@@ -102,6 +102,7 @@ button:focus-visible, input:focus-visible { outline: 2px solid #7dd3fc; outline-
 .report td { font-family: var(--mono); font-variant-numeric: tabular-nums; }
 .report td.best { color: #86efac; font-weight: 700; }
 .report .note { margin: 0 0 12px; color: var(--muted); font-size: 11px; }
+.shotcap { position: fixed; top: 30px; left: 50%; translate: -50% 0; margin: 0; padding: 4px 12px; border-radius: 99px; background: rgb(7 9 13 / 0.8); border: 1px solid var(--line); font: 12px var(--mono); color: var(--text); white-space: nowrap; max-width: calc(100% - 420px); overflow: hidden; text-overflow: ellipsis; z-index: 3; }
 .keys { position: fixed; top: 10px; left: 50%; translate: -50% 0; margin: 0; color: var(--muted); font-size: 11px; pointer-events: none; white-space: nowrap; }
 
 /* event / file detail */
@@ -155,6 +156,9 @@ button:focus-visible, input:focus-visible { outline: 2px solid #7dd3fc; outline-
 .empty h1 { color: var(--text); font-size: 18px; }
 .empty code { font-family: var(--mono); color: #7dd3fc; }
 
+@media (max-width: 1560px) {
+  .mapkey .muted { display: none; } /* hint stays available as the key's tooltip */
+}
 @media (max-width: 900px) {
   .mapkey { display: none; }
   .keys { display: none; }

@@ -7,7 +7,7 @@ import { init, jumpTo, seekBy, toggleLanes, togglePlay, useRace, type Cam } from
 import { isCheck, isEdit, isError } from './report.ts';
 import './style.css';
 
-const CAMS: Cam[] = ['overview', 'follow', 'top'];
+const CAMS: Cam[] = ['overview', 'follow', 'top', 'director'];
 
 function App() {
   useEffect(() => {

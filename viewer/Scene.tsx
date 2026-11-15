@@ -7,6 +7,7 @@ import type { Agent } from '../src/race.ts';
 import { metricValue, upper, type FileNode } from './codemap.ts';
 import { AGENT_COLOR, AGENT_NAME, FAIL_COLOR, KIND_COLOR, idxAt, useRace } from './store.ts';
 import { actionText } from './actions.ts';
+import { pickShot, priority, shotKey, type Focus, type Shot } from './director.ts';
 
 const BG = '#07090d';
 type OrbitControlsImpl = ComponentRef<typeof OrbitControls>;
@@ -453,6 +454,9 @@ function CameraRig() {
   }, [camera, cs]);
   const wantPos = useMemo(() => new THREE.Vector3(), []);
   const wantLook = useMemo(() => new THREE.Vector3(), []);
+  // Director state: current shot, when it started (real ms), orbit angle for close-ups.
+  const director = useRef<{ shot: Shot | null; key: string; since: number; angle: number }>({ shot: null, key: '', since: 0, angle: 0.6 });
+  const reduceMotion = useMemo(() => matchMedia('(prefers-reduced-motion: reduce)').matches, []);
 
   useFrame((_, dt) => {
     const s = useRace.getState();
@@ -466,7 +470,50 @@ function CameraRig() {
       look.current.copy(target);
       return;
     }
-    if (s.cam === 'follow') {
+    let k = 1 - Math.exp(-dt * 3);
+    if (s.cam === 'director') {
+      // What is each agent doing right now, and where?
+      const focus: Focus[] = [];
+      for (const a of s.agents) {
+        if (s.time >= s.meta[a].totalMs) continue;
+        const e = s.lanes[a].events[idxAt(s.lanes[a].events, s.time)];
+        const f = e?.files?.length ? s.map.byPath.get(e.files[0]) : undefined;
+        if (f) focus.push({ agent: a, path: f.path, x: f.rect.x + f.rect.w / 2, z: f.rect.y + f.rect.h / 2, prio: priority(e) });
+      }
+      const next = pickShot(focus, 6 * cs);
+      const key = shotKey(next);
+      const d = director.current;
+      const held = performance.now() - d.since;
+      // Hold each shot ~2.5s so the camera doesn't jitter; a fresh edit/failure may cut in after 0.8s.
+      const urgent = next.focus[0]?.prio === 3 && (d.shot?.focus[0]?.prio ?? 0) < 3;
+      if (!d.shot || (key !== d.key && (held > 2500 || (urgent && held > 800)))) {
+        d.shot = next;
+        d.key = key;
+        d.since = performance.now();
+        const who = next.focus.map((x) => {
+          const e = s.lanes[x.agent].events[idxAt(s.lanes[x.agent].events, s.time)];
+          return `${AGENT_NAME[x.agent]} ${e ? actionText(e).replace(/^\S+ /, '') : ''}`;
+        });
+        s.set({ shot: next.kind === 'wide' ? 'Wide · whole codebase' : `${next.kind === 'two' ? 'Two-shot' : 'Close-up'} · ${who.join('  |  ')}` });
+      }
+      const shot = d.shot;
+      if (!reduceMotion) d.angle += dt * 0.12; // slow orbit keeps close-ups alive
+      if (shot.kind === 'close') {
+        const f = s.map.byPath.get(shot.focus[0].path);
+        const h = f ? (stackH[f.i] ?? 0) : 0;
+        const r = 13 * cs; // close enough to read the file, far enough to see its neighbours
+        wantLook.set(shot.x, h * 0.5, shot.z);
+        wantPos.set(shot.x + Math.sin(d.angle) * r, h + 11 * cs, shot.z + Math.cos(d.angle) * r);
+      } else if (shot.kind === 'two') {
+        wantLook.set(shot.x, 0, shot.z);
+        wantPos.set(shot.x, shot.spread * 0.75 + 6 * cs, shot.z + shot.spread * 0.7 + 6 * cs);
+      } else {
+        wantLook.set(0, 0, -cs);
+        wantPos.set(0, 39 * cs, 35 * cs);
+      }
+      k = 1 - Math.exp(-dt * 2.2); // smooth dolly between shots...
+      look.current.lerp(wantLook, 1 - Math.exp(-dt * 5)); // ...but aim locks on fast so the subject stays centered
+    } else if (s.cam === 'follow') {
       const ps = s.agents.map((a) => botPos[a]).filter((p): p is THREE.Vector3 => !!p);
       const mid = ps.reduce((m, p) => m.add(p), new THREE.Vector3()).multiplyScalar(1 / Math.max(ps.length, 1));
       wantLook.set(mid.x, 0, mid.z);
@@ -475,7 +522,6 @@ function CameraRig() {
       wantLook.set(0, 0, 0);
       wantPos.set(0, 62 * cs, 0.01);
     }
-    const k = 1 - Math.exp(-dt * 3);
     camera.position.lerp(wantPos, k);
     look.current.lerp(wantLook, k);
     camera.lookAt(look.current);

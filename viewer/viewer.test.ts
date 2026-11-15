@@ -125,3 +125,21 @@ test('isCheck matches test/lint runners as commands, not test file names', async
   for (const no of ['$ grep -n x src/app/globals.contrast.test.ts', '$ cat jest.config.js', '$ ls tests/', '$ git status'])
     assert.ok(!isCheck(b(no)), no);
 });
+
+test('director picks close-up / two-shot / wide from current actions', async () => {
+  const { pickShot, priority } = await import('./director.ts');
+  const ev = (kind: RaceEvent['kind'], extra: Partial<RaceEvent> = {}): RaceEvent =>
+    ({ id: 'e', agent: 'claude', t: 0, dur: 0, step: 0, kind, summary: '', ...extra });
+  assert.equal(priority(ev('edit', { files: ['a'] })), 3);
+  assert.equal(priority(ev('bash', { files: ['a'], ok: false })), 3);
+  assert.equal(priority(ev('bash', { files: ['a'], summary: '$ pnpm test' })), 2);
+  assert.equal(priority(ev('read', { files: ['a'] })), 1);
+  assert.equal(priority(ev('thinking')), 0);
+  const f = (agent: 'claude' | 'codex', x: number, prio: number) => ({ agent, path: `${agent}.ts`, x, z: 0, prio });
+  assert.equal(pickShot([f('claude', 0, 0), f('codex', 5, 0)], 6).kind, 'wide');
+  const close = pickShot([f('claude', 0, 3), f('codex', 20, 1)], 6);
+  assert.deepEqual([close.kind, close.focus[0].agent], ['close', 'claude']); // edit beats read
+  const two = pickShot([f('claude', 0, 3), f('codex', 20, 3)], 6);
+  assert.deepEqual([two.kind, two.x], ['two', 10]);
+  assert.equal(pickShot([f('claude', 0, 3), f('codex', 2, 3)], 6).kind, 'close'); // too close for a two-shot
+});

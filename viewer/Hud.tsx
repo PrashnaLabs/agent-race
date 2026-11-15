@@ -266,7 +266,12 @@ function Controls() {
           ✓ test
         </button>
       </div>
-      <Segmented<Cam> label="Camera" value={cam} options={[['overview', 'Overview'], ['follow', 'Follow'], ['top', 'Top']]} onChange={(cam) => set({ cam })} />
+      <Segmented<Cam>
+        label="Camera"
+        value={cam}
+        options={[['overview', 'Overview'], ['follow', 'Follow'], ['top', 'Top'], ['director', 'Director']]}
+        onChange={(cam) => set({ cam })}
+      />
       <button className="reportbtn" onClick={() => set({ report: true, reportSeen: true })}>
         Report
       </button>
@@ -521,6 +526,17 @@ function Report() {
   );
 }
 
+function ShotCaption() {
+  const cam = useRace((s) => s.cam);
+  const shot = useRace((s) => s.shot);
+  if (cam !== 'director' || !shot) return null;
+  return (
+    <p className="shotcap" aria-live="polite">
+      <span>🎬</span> {shot}
+    </p>
+  );
+}
+
 export function Hud() {
   const agents = useRace((s) => s.agents);
   return (
@@ -536,7 +552,8 @@ export function Hud() {
       <Tooltip />
       <Controls />
       <Report />
-      <p className="keys">space play · ←/→ seek · E/X/T next edit/error/test · R report · L swimlanes · esc close</p>
+      <ShotCaption />
+      <p className="keys">space play · ←/→ seek · 1–4 camera · E/X/T next edit/error/test · R report · L swimlanes · esc close</p>
     </>
   );
 }

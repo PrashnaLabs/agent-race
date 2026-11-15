@@ -4,7 +4,7 @@ import { makeAxis, type Axis } from './axis.ts';
 import { buildCodeMap, type CodeMap, type FileNode, type Metric } from './codemap.ts';
 import { jump } from './report.ts';
 
-export type Cam = 'overview' | 'follow' | 'top';
+export type Cam = 'overview' | 'follow' | 'top' | 'director';
 
 export const KIND_COLOR: Record<Kind, string> = {
   user: '#facc15',
@@ -44,6 +44,7 @@ type State = {
   report: boolean; // report card open
   reportSeen: boolean; // auto-opened once at the end of playback
   byTime: RaceEvent[]; // all agents' events sorted by time (jump keys)
+  shot: string; // director camera caption
   hidden: Kind[];
   selected: RaceEvent | null;
   selFile: FileNode | null;
@@ -81,6 +82,7 @@ export const useRace = create<State>()((set) => ({
   report: false,
   reportSeen: false,
   byTime: [],
+  shot: '',
   hidden: [],
   selected: null,
   selFile: null,
@@ -118,7 +120,7 @@ export function setCollapse(collapse: boolean) {
 }
 
 export function init(race: Race) {
-  // Deep link: #t=<ms>&cam=overview|follow|top&lanes=1&h=touches|lines|tokens|time&edits=1
+  // Deep link: #t=<ms>&cam=overview|follow|top|director&lanes=1&h=touches|lines|tokens|time&edits=1
   const h = new URLSearchParams(location.hash.slice(1));
   const cam = h.get('cam') as Cam | null;
   const agents = agentsIn(race);
@@ -135,7 +137,7 @@ export function init(race: Race) {
     maxMs,
     axis,
     time: Number(h.get('t')) || 0,
-    ...(cam && ['overview', 'follow', 'top'].includes(cam) && { cam }),
+    ...(cam && ['overview', 'follow', 'top', 'director'].includes(cam) && { cam }),
     ...(h.get('lanes') === '1' && { tlH: tlMax() }),
     editsOnly: h.get('edits') === '1',
     ...(['touches', 'lines', 'tokens', 'time'].includes(h.get('h') ?? '') && { metric: h.get('h') as Metric }),
