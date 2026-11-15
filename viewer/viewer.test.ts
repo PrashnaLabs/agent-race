@@ -60,3 +60,15 @@ test('codemap splits response tokens across touched files and tool time per file
   assert.equal(m.max.tokens, 200);
   assert.equal(metricValue(b, 2, 'touches'), 1 + 3); // 1 read + 1 edit (x3)
 });
+
+test('files touched by both agents split into time-ordered runs', () => {
+  const ev = (agent: 'claude' | 'codex', t: number, kind: RaceEvent['kind']): RaceEvent =>
+    ({ id: `${agent}${t}`, agent, t, dur: 1, step: t, kind, summary: '', files: ['style.css'] });
+  const m = buildCodeMap(
+    [ev('codex', 1, 'edit'), ev('codex', 2, 'read'), ev('claude', 3, 'read'), ev('claude', 4, 'edit'), ev('codex', 5, 'edit')],
+    ['claude', 'codex'],
+  );
+  const f = m.byPath.get('style.css')!;
+  assert.deepEqual(f.runs.map((r) => [r.agent, r.start, r.end]), [['codex', 0, 2], ['claude', 2, 4], ['codex', 4, 5]]);
+  assert.equal(m.runs.length, 3);
+});

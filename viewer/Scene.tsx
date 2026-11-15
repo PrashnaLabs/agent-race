@@ -4,14 +4,15 @@ import { Edges, Html, OrbitControls } from '@react-three/drei';
 import { Bloom, EffectComposer } from '@react-three/postprocessing';
 import * as THREE from 'three';
 import type { Agent } from '../src/race.ts';
-import { MAP_H, metricValue, upper, type FileNode } from './codemap.ts';
-import { AGENT_COLOR, AGENT_NAME, BOTH_COLOR, FAIL_COLOR, KIND_COLOR, idxAt, useRace } from './store.ts';
+import { metricValue, upper, type FileNode } from './codemap.ts';
+import { AGENT_COLOR, AGENT_NAME, FAIL_COLOR, KIND_COLOR, idxAt, useRace } from './store.ts';
 
 const BG = '#07090d';
 type OrbitControlsImpl = ComponentRef<typeof OrbitControls>;
 
 // Per-frame shared state, deliberately outside React: tile heights (bots sit on them) and bot positions (follow cam).
-const tileH: number[] = [];
+const tileH: number[] = []; // animated total height per file (drives layer thickness)
+const stackH: number[] = []; // actual top of each file's stack (layers add seams/min heights)
 const botPos: Partial<Record<Agent, THREE.Vector3>> = {};
 
 const center = (f: FileNode) => [f.rect.x + f.rect.w / 2, f.rect.y + f.rect.h / 2] as const;
@@ -65,59 +66,93 @@ const tmpC = new THREE.Color();
 const UNTOUCHED = new THREE.Color('#1b2232');
 const WHITE = new THREE.Color('#ffffff');
 
+// One instance per run (consecutive touches by one agent). Files touched by both agents become stacks
+// of layers in time order, each as thick as its share of the height metric.
+const MIN_LAYER = 0.07;
+const SEAM = 0.035; // dark gap between layers so the stack reads as separate changes
+
 function Tiles() {
   const files = useRace((s) => s.map.files);
+  const runs = useRace((s) => s.map.runs);
   const max = useRace((s) => s.map.max);
   const agents = useRace((s) => s.agents);
   const ref = useRef<THREE.InstancedMesh>(null!);
-  const colors = useMemo(
-    () => ({ both: new THREE.Color(BOTH_COLOR), ...Object.fromEntries(agents.map((a) => [a, new THREE.Color(AGENT_COLOR[a])])) }) as Record<string, THREE.Color>,
-    [agents],
-  );
+  const colors = useMemo(() => Object.fromEntries(agents.map((a) => [a, new THREE.Color(AGENT_COLOR[a])])) as Record<string, THREE.Color>, [agents]);
+  const firstRun = useMemo(() => new Set(files.map((f) => f.runs[0])), [files]);
 
   useLayoutEffect(() => {
-    files.forEach((f, i) => {
-      tileH[i] = 0.06;
-      ref.current.setColorAt(i, UNTOUCHED); // allocates instanceColor
+    files.forEach((f) => {
+      tileH[f.i] = 0.06;
+      stackH[f.i] = 0.06;
     });
-  }, [files]);
+    runs.forEach((_, i) => ref.current.setColorAt(i, UNTOUCHED)); // allocates instanceColor
+  }, [files, runs]);
 
   useFrame((_, dt) => {
-    if (!files.length) return;
+    if (!runs.length) return;
     const { time, speed, axis, selected, selFile, hover, metric } = useRace.getState();
     const k = 1 - Math.exp(-dt * 8);
     const now = axis.toV(time);
     const flash = 500 * speed; // ~0.5s of real time at any speed
-    for (const f of files) {
-      const n = upper(f.touches, time);
-      const edits = n ? f.editsAt[n - 1] : 0;
-      tileH[f.i] += ((n ? targetHeight(metricValue(f, n, metric), max[metric]) : 0.06) - tileH[f.i]) * k;
-      const h = tileH[f.i];
+    let base = 0; // running bottom of the current file's stack
+    let file: FileNode | null = null;
+    let n = 0;
+    let total = 0;
+    let started = 0;
+
+    runs.forEach((r, i) => {
+      const f = r.file;
+      if (f !== file) {
+        // new file: advance its animated total height, reset the stack
+        file = f;
+        n = upper(f.touches, time);
+        total = metricValue(f, n, metric);
+        started = f.runs.filter((x) => x.start < n).length;
+        tileH[f.i] += ((n ? targetHeight(total, max[metric]) : 0.06) - tileH[f.i]) * k;
+        base = 0;
+      }
       const gap = Math.min(0.18, f.rect.w * 0.2, f.rect.h * 0.2);
       const [cx, cz] = center(f);
-      tmpP.set(cx, h / 2, cz);
-      tmpS.set(Math.max(f.rect.w - gap * 2, 0.05), h, Math.max(f.rect.h - gap * 2, 0.05));
-      ref.current.setMatrixAt(f.i, tmpM.compose(tmpP, tmpQ, tmpS));
+      const w = Math.max(f.rect.w - gap * 2, 0.05);
+      const d = Math.max(f.rect.h - gap * 2, 0.05);
 
-      const by = agents.filter((a) => (f.first[a] ?? Infinity) <= time);
-      if (!by.length) tmpC.copy(UNTOUCHED);
-      else {
-        tmpC.copy(by.length > 1 ? colors.both : colors[by[0]]).multiplyScalar(edits ? 1 : 0.7);
-        if (now - axis.toV(f.touches[n - 1].t) < flash) tmpC.multiplyScalar(2.6); // HDR flash -> bloom
+      if (r.start >= n) {
+        // not reached yet: the bottom run doubles as the flat "untouched" tile
+        const ghost = !n && firstRun.has(r);
+        tmpP.set(cx, 0.03, cz);
+        tmpS.set(ghost ? w : 0, ghost ? 0.06 : 0, ghost ? d : 0);
+        ref.current.setMatrixAt(i, tmpM.compose(tmpP, tmpQ, tmpS));
+        ref.current.setColorAt(i, UNTOUCHED);
+        if (ghost) stackH[f.i] = 0.06;
+        return;
       }
-      if (f === selFile || f === hover?.file || selected?.files?.includes(f.path)) tmpC.lerp(WHITE, 0.5).multiplyScalar(1.3);
-      ref.current.setColorAt(f.i, tmpC);
-    }
+      const upto = Math.min(r.end, n);
+      const part = metricValue(f, upto, metric) - metricValue(f, r.start, metric);
+      const share = total > 0 ? part / total : 1 / started;
+      const h = Math.max(tileH[f.i] * share, MIN_LAYER);
+      const sh = started > 1 ? Math.max(h - SEAM, MIN_LAYER * 0.6) : h;
+      tmpP.set(cx, base + sh / 2, cz);
+      tmpS.set(w, sh, d);
+      ref.current.setMatrixAt(i, tmpM.compose(tmpP, tmpQ, tmpS));
+      base += h;
+      stackH[f.i] = base;
+
+      const edited = f.editsAt[upto - 1] - (r.start ? f.editsAt[r.start - 1] : 0) > 0;
+      tmpC.copy(colors[r.agent]).multiplyScalar(edited ? 1 : 0.6);
+      if (now - axis.toV(f.touches[upto - 1].t) < flash) tmpC.multiplyScalar(2.6); // HDR flash -> bloom
+      if (f === selFile || f === hover?.file || selected?.files?.includes(f.path)) tmpC.lerp(WHITE, 0.45).multiplyScalar(1.25);
+      ref.current.setColorAt(i, tmpC);
+    });
     ref.current.instanceMatrix.needsUpdate = true;
     ref.current.instanceColor!.needsUpdate = true;
   });
 
-  const at = (id?: number) => (id == null ? undefined : files[id]);
+  const at = (id?: number) => (id == null ? undefined : runs[id]?.file);
   return (
     <instancedMesh
       ref={ref}
-      args={[undefined, undefined, Math.max(files.length, 1)]}
-      count={files.length}
+      args={[undefined, undefined, Math.max(runs.length, 1)]}
+      count={runs.length}
       frustumCulled={false}
       onPointerMove={(e) => {
         e.stopPropagation();
@@ -144,7 +179,8 @@ function Tiles() {
 
 const TRAIL = 14;
 
-function Bot({ agent, offset }: { agent: Agent; offset: number }) {
+function Bot({ agent, offset, labelY }: { agent: Agent; offset: number; labelY: number }) {
+  const home = useRace((s) => s.map.size.h / 2 + 3); // waiting spot in front of the map
   const hops = useRace((s) => s.map.hops[agent]);
   const lane = useRace((s) => s.lanes[agent]);
   const meta = useRace((s) => s.meta[agent]);
@@ -156,14 +192,14 @@ function Bot({ agent, offset }: { agent: Agent; offset: number }) {
   const last = useRef({ hop: -2, idx: -2, done: false });
   const top = (f: FileNode) => {
     const [x, z] = center(f);
-    return new THREE.Vector3(x + offset, tileH[f.i] ?? 0, z);
+    return new THREE.Vector3(x + offset, stackH[f.i] ?? 0, z);
   };
 
   useFrame(({ clock }, dt) => {
     const { time } = useRace.getState();
     const h = upper(hops, time) - 1;
     const f = h >= 0 ? hops[h].file : null;
-    const want = f ? top(f).add(new THREE.Vector3(0, 1.3, 0)) : new THREE.Vector3(offset * 4, 3, MAP_H / 2 + 3);
+    const want = f ? top(f).add(new THREE.Vector3(0, 1.3, 0)) : new THREE.Vector3(offset * 4, 3, home);
     g.current.position.lerp(want, 1 - Math.exp(-dt * 6));
     g.current.position.y += Math.sin(clock.elapsedTime * 3 + offset * 4) * 0.004;
     halo.current.scale.setScalar(1 + Math.sin(clock.elapsedTime * 5) * 0.08);
@@ -207,7 +243,7 @@ function Bot({ agent, offset }: { agent: Agent; offset: number }) {
   return (
     <>
       <primitive object={trail} />
-      <group ref={g} position={[offset * 4, 3, MAP_H / 2 + 3]}>
+      <group ref={g} position={[offset * 4, 3, home]}>
         <mesh>
           <sphereGeometry args={[0.45, 24, 16]} />
           <meshBasicMaterial color={color.clone().multiplyScalar(2.2)} toneMapped={false} />
@@ -217,7 +253,7 @@ function Bot({ agent, offset }: { agent: Agent; offset: number }) {
           <meshBasicMaterial color={color} transparent opacity={0.16} depthWrite={false} />
         </mesh>
         <pointLight color={color} intensity={30} distance={9} />
-        <Html position={[0, 1.1, 0]} center className="label3d now" zIndexRange={[20, 10]}>
+        <Html position={[0, labelY, 0]} center className="label3d now" zIndexRange={[20, 10]}>
           <div ref={label} />
         </Html>
       </group>
@@ -232,7 +268,7 @@ function SelectedFile() {
     ref.current.visible = !!f;
     if (!f) return;
     const [x, z] = center(f);
-    const h = tileH[f.i] ?? 0.1;
+    const h = stackH[f.i] ?? 0.1;
     const s = 1 + Math.sin(clock.elapsedTime * 6) * 0.03;
     ref.current.position.set(x, h / 2, z);
     ref.current.scale.set(f.rect.w * s, h * s + 0.15, f.rect.h * s);
@@ -250,6 +286,11 @@ function CameraRig() {
   const controls = useRef<OrbitControlsImpl>(null!);
   const { camera, scene } = useThree();
   const look = useRef(new THREE.Vector3(0, 0, -1));
+  const cs = useRace((s) => Math.max(s.map.size.scale, 0.62)); // camera distance follows map size (floor: tiles are up to 6 tall)
+  useLayoutEffect(() => {
+    camera.position.set(0, 39 * cs, 35 * cs);
+    camera.lookAt(0, 0, -cs);
+  }, [camera, cs]);
   const wantPos = useMemo(() => new THREE.Vector3(), []);
   const wantLook = useMemo(() => new THREE.Vector3(), []);
 
@@ -272,7 +313,7 @@ function CameraRig() {
       wantPos.set(mid.x, 17, mid.z + 15);
     } else {
       wantLook.set(0, 0, 0);
-      wantPos.set(0, 62, 0.01);
+      wantPos.set(0, 62 * cs, 0.01);
     }
     const k = 1 - Math.exp(-dt * 3);
     camera.position.lerp(wantPos, k);
@@ -281,7 +322,7 @@ function CameraRig() {
     controls.current?.target.copy(look.current); // so switching back to overview starts from here
   });
 
-  return <OrbitControls ref={controls} target={[0, 0, -1]} enabled={cam === 'overview'} enableDamping maxPolarAngle={Math.PI / 2.1} />;
+  return <OrbitControls ref={controls} target={[0, 0, -cs]} enabled={cam === 'overview'} enableDamping maxPolarAngle={Math.PI / 2.1} />;
 }
 
 export function Scene() {
@@ -289,7 +330,7 @@ export function Scene() {
   const empty = useRace((s) => s.map.files.length === 0);
   return (
     <div className="stage">
-    <Canvas dpr={[1, 2]} camera={{ position: [0, 44, 40], fov: 45, far: 2000 }} gl={{ antialias: true }}>
+    <Canvas dpr={[1, 2]} camera={{ position: [0, 39, 35], fov: 45, far: 2000 }} gl={{ antialias: true }}>
       <color attach="background" args={[BG]} />
       <fog attach="fog" args={[BG, 70, 190]} />
       <ambientLight intensity={0.45} />
@@ -304,7 +345,7 @@ export function Scene() {
       <Tiles />
       <SelectedFile />
       {agents.map((a, i) => (
-        <Bot key={a} agent={a} offset={agents.length > 1 ? (i ? 0.5 : -0.5) : 0} />
+        <Bot key={a} agent={a} offset={agents.length > 1 ? (i ? 0.5 : -0.5) : 0} labelY={1.1 + i * 0.8} />
       ))}
       {empty && (
         <Html center position={[0, 1, 0]} className="label3d empty3d">

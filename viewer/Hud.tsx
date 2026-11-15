@@ -1,11 +1,10 @@
-import type { CSSProperties } from 'react';
+import { useEffect, useRef, type CSSProperties } from 'react';
 import { KINDS, type Agent } from '../src/race.ts';
 import type { FileNode, Metric } from './codemap.ts';
 import { Timeline } from './Timeline.tsx';
 import {
   AGENT_COLOR,
   AGENT_NAME,
-  BOTH_COLOR,
   FAIL_COLOR,
   KIND_COLOR,
   SPEEDS,
@@ -14,7 +13,12 @@ import {
   fmtMs,
   fmtTok,
   idxAt,
+  TL_MIN,
+  isFull,
   setCollapse,
+  setTlH,
+  tlMax,
+  toggleLanes,
   togglePlay,
   useRace,
   type Cam,
@@ -35,7 +39,7 @@ function fileStats(f: FileNode, agent: Agent, time = Infinity) {
 }
 const statLine = (s: ReturnType<typeof fileStats>) => `${s.n} touches · ${fmtTok(s.tokens)} tok · ${fmtDur(s.ms)}`;
 
-function AgentCard({ agent }: { agent: Agent }) {
+function AgentCard({ agent, side }: { agent: Agent; side: 'left' | 'right' }) {
   const meta = useRace((s) => s.meta[agent]);
   const lane = useRace((s) => s.lanes[agent]);
   const time = useRace((s) => s.time);
@@ -47,7 +51,7 @@ function AgentCard({ agent }: { agent: Agent }) {
   const touched = files.filter((f) => (f.first[agent] ?? Infinity) <= time).length;
   const pct = meta.steps ? ((i + 1) / meta.steps) * 100 : 0;
   return (
-    <section className="card" style={{ '--c': AGENT_COLOR[agent] } as CSSProperties}>
+    <section className={`card ${side}`} style={{ '--c': AGENT_COLOR[agent] } as CSSProperties} aria-label={`${AGENT_NAME[agent]} progress`}>
       <header>
         <span className="name">{AGENT_NAME[agent]}</span>
         {meta.model && <span className="model">{meta.model}</span>}
@@ -80,12 +84,45 @@ function AgentCard({ agent }: { agent: Agent }) {
 
 function TimelinePanel() {
   const hidden = useRace((s) => s.hidden);
-  const open = useRace((s) => s.lanesOpen);
+  const tlH = useRace((s) => s.tlH);
+  const open = isFull(tlH);
   const agents = useRace((s) => s.agents);
   const metric = useRace((s) => s.metric);
   const set = useRace((s) => s.set);
+  const drag = useRef<{ y: number; h: number } | null>(null);
+
+  // The map, detail panel and timeline all size off --tl-h.
+  useEffect(() => document.documentElement.style.setProperty('--tl-h', `${tlH}px`), [tlH]);
+  useEffect(() => {
+    const onResize = () => setTlH(useRace.getState().tlH); // re-clamp to the new window height
+    addEventListener('resize', onResize);
+    return () => removeEventListener('resize', onResize);
+  }, []);
+
   return (
-    <section className={open ? 'tlpanel open' : 'tlpanel'} aria-label="Timeline">
+    <section className="tlpanel" aria-label="Timeline">
+      <div
+        className="grip"
+        role="separator"
+        aria-orientation="horizontal"
+        aria-label="Resize timeline (drag, arrow keys, or double-click)"
+        aria-valuenow={tlH}
+        aria-valuemin={TL_MIN}
+        aria-valuemax={tlMax()}
+        tabIndex={0}
+        onPointerDown={(e) => {
+          e.currentTarget.setPointerCapture(e.pointerId);
+          drag.current = { y: e.clientY, h: tlH };
+        }}
+        onPointerMove={(e) => drag.current && setTlH(drag.current.h + drag.current.y - e.clientY)}
+        onPointerUp={() => (drag.current = null)}
+        onDoubleClick={toggleLanes}
+        onKeyDown={(e) => {
+          if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return;
+          e.preventDefault();
+          setTlH(tlH + (e.key === 'ArrowUp' ? 40 : -40));
+        }}
+      />
       <header>
         <nav className="filters" aria-label="Event types">
           {KINDS.map((k) => {
@@ -116,9 +153,8 @@ function TimelinePanel() {
             </span>
           ))}
           {agents.length > 1 && (
-            <span>
-              <i style={{ background: BOTH_COLOR }} />
-              both
+            <span className="muted" title="A file both agents touched is a stack of layers, bottom = first, one layer per stretch of work by one agent">
+              shared files stack in order
             </span>
           )}
         </p>
@@ -128,8 +164,8 @@ function TimelinePanel() {
           options={[['touches', 'Height: touches'], ['tokens', 'tokens'], ['time', 'time']]}
           onChange={(metric) => set({ metric })}
         />
-        <button className="expand" aria-pressed={open} onClick={() => set({ lanesOpen: !open })}>
-          {open ? 'Collapse timeline' : 'Expand to swimlanes'}
+        <button className="expand" aria-pressed={open} onClick={toggleLanes}>
+          {open ? 'Collapse swimlanes' : 'Expand swimlanes'}
         </button>
       </header>
       <Timeline />
@@ -339,9 +375,9 @@ export function Hud() {
   const agents = useRace((s) => s.agents);
   return (
     <>
-      <div className="top">
-        {agents.map((a) => (
-          <AgentCard key={a} agent={a} />
+      <div className="cards">
+        {agents.map((a, i) => (
+          <AgentCard key={a} agent={a} side={i ? 'right' : 'left'} />
         ))}
       </div>
       <EventDetail />

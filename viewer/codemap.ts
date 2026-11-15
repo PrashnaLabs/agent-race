@@ -1,8 +1,9 @@
 // Repo-as-city layout: folders and files as a squarified treemap, plus per-file touch history.
 import type { Agent, RaceEvent } from '../src/race.ts';
 
-export const MAP_W = 64;
-export const MAP_H = 38;
+// Full-size map for ~150+ files; smaller sessions get a smaller map so tiles stay column-shaped.
+const FULL_W = 64;
+const FULL_H = 38;
 
 export type Rect = { x: number; y: number; w: number; h: number };
 export type Metric = 'touches' | 'tokens' | 'time';
@@ -20,7 +21,10 @@ export type FileNode = {
   first: Partial<Record<Agent, number>>; // first touch time per agent
   weight: number;
   rect: Rect;
+  runs: Run[]; // bottom to top
 };
+// A run of consecutive touches by one agent. Files touched by both agents stack their runs in time order.
+export type Run = { file: FileNode; agent: Agent; start: number; end: number }; // touches[start..end)
 export type Group = { key: string; files: FileNode[]; weight: number; rect: Rect };
 export type Hop = { t: number; file: FileNode };
 export type CodeMap = {
@@ -28,7 +32,9 @@ export type CodeMap = {
   groups: Group[];
   byPath: Map<string, FileNode>;
   hops: Record<Agent, Hop[]>;
-  max: Record<Metric, number>; // largest end-of-session value per metric, for scaling tile heights
+  runs: Run[]; // all files' runs, flat: one 3D layer each
+  max: Record<Metric, number>;
+  size: { w: number; h: number; scale: number }; // map footprint (scale 1 = full size) // largest end-of-session value per metric, for scaling tile heights
 };
 
 // Value of a metric for a file after its first n touches. Edits weigh more than reads for `touches`.
@@ -101,7 +107,7 @@ export function buildCodeMap(events: RaceEvent[], agents: Agent[]): CodeMap {
     for (const path of paths) {
       let f = byPath.get(path);
       if (!f)
-        byPath.set(path, (f = { i: byPath.size, path, touches: [], readsAt: [], editsAt: [], tokAt: [], msAt: [], first: {}, weight: 0, rect: { x: 0, y: 0, w: 0, h: 0 } }));
+        byPath.set(path, (f = { i: byPath.size, path, touches: [], readsAt: [], editsAt: [], tokAt: [], msAt: [], first: {}, weight: 0, rect: { x: 0, y: 0, w: 0, h: 0 }, runs: [] }));
       const touch = { t: e.t, agent: e.agent, edit: e.kind === 'edit', ev: e, tokens: 0, ms: e.dur / paths.length };
       f.touches.push(touch);
       mine.push(touch);
@@ -131,7 +137,10 @@ export function buildCodeMap(events: RaceEvent[], agents: Agent[]): CodeMap {
     let ed = 0;
     let tok = 0;
     let ms = 0;
-    for (const x of f.touches) {
+    for (const [k, x] of f.touches.entries()) {
+      const last = f.runs.at(-1);
+      if (last?.agent === x.agent) last.end = k + 1;
+      else f.runs.push({ file: f, agent: x.agent, start: k, end: k + 1 });
       if (x.edit) ed++;
       else r++;
       tok += x.tokens;
@@ -154,7 +163,9 @@ export function buildCodeMap(events: RaceEvent[], agents: Agent[]): CodeMap {
     g.files.push(f);
     g.weight += f.weight;
   }
-  const groups = squarify([...groupMap.values()], -MAP_W / 2, -MAP_H / 2, MAP_W, MAP_H);
+  const scale = Math.min(1, Math.max(0.3, Math.sqrt(files.length / 150)));
+  const size = { w: FULL_W * scale, h: FULL_H * scale, scale };
+  const groups = squarify([...groupMap.values()], -size.w / 2, -size.h / 2, size.w, size.h);
   for (const g of groups) {
     const r = g.rect;
     // inset leaves room for the folder label along the top edge
@@ -167,7 +178,7 @@ export function buildCodeMap(events: RaceEvent[], agents: Agent[]): CodeMap {
       .filter((e) => e.agent === a && e.files?.length)
       .sort((x, y) => x.t - y.t)
       .map((e) => ({ t: e.t, file: byPath.get(e.files![0])! }));
-  return { files, groups, byPath, hops, max };
+  return { files, groups, byPath, hops, runs: files.flatMap((f) => f.runs), max, size };
 }
 
 // Count of items with t <= time (items sorted by t).

@@ -90,6 +90,7 @@ When stdin is not a terminal (CI, scripts), pass `--claude <file>` and/or `--cod
 | `←` / `→` | Seek back / forward |
 | `1` `2` `3` | Camera: **Overview** (drag to orbit, scroll to zoom), **Follow** (tracks the agents), **Top** (straight down) |
 | `L` | Expand / collapse the timeline into full swimlanes |
+| Timeline grip (top edge) | Drag to resize the timeline (or focus it and use ↑/↓; double-click toggles). Taller than ~320px it becomes full swimlanes. The height is remembered in this browser |
 | `Esc` | Close the detail panel |
 | Hover a tile | File path, plus touches, tokens and time so far, per agent |
 | Click a tile | Totals, then every read/edit of that file in order with its token and time share; click one to jump there |
@@ -105,13 +106,15 @@ Open a specific moment with a URL hash, for example `http://127.0.0.1:4173/#t=90
 
 ### How to read it
 
-- **Tiles**: orange = only Claude Code touched it, blue = only Codex, violet = both. Files that were only read are dimmer. A tile flashes when it is touched.
+- **Tiles**: orange = Claude Code, blue = Codex. Dark grey-blue = not touched yet at the playhead. Full color = the agent edited it; dimmer = only read or searched. A tile flashes when it is touched, and turns whitish when hovered or selected. (Darker side faces and the glow near the agent lights are just lighting.)
+- **Shared files stack**: a file touched by both agents becomes a stack of layers in time order, bottom = first. Each layer is one uninterrupted stretch of work by one agent, as thick as that stretch's share of the height metric (touches, tokens or time). So `codex / claude / codex` from the bottom means Codex worked on it, then Claude, then Codex again.
 - **Tile height** (switch in the timeline header), scaled against the busiest file and growing as the replay plays:
   - **touches**: reads + 3 × edits.
   - **tokens**: estimated output tokens spent on the file. Logs record tokens per model response, not per file, so each response's output tokens are split evenly across the files its tool calls touched. Responses that touched no files (planning, final answers) aren't counted, which is usually 25–30% of the total. Input tokens (file contents read into context) aren't counted.
   - **time**: how long tool calls on the file ran (call to result). A call touching several files splits its time evenly. Model thinking time isn't included.
+- **Map size** follows the number of files: a session that touched a handful of files gets a small map of tall columns, a big one fills the full map.
 - **Folders**: districts group files up to two folders deep. `(root)` holds top-level files; `(outside)` holds files outside the repo.
-- **Scoreboards**: elapsed time, steps, files touched and output tokens so far for each agent.
+- **Scoreboards** (left edge for the first agent, right edge for the second): elapsed time, steps, files touched and output tokens so far.
 - **Timeline colors**: user (yellow), thinking (violet), message (white), read (blue), search (cyan), edit (green), bash (orange), other tools (pink). Failed calls are red.
 - Time spent waiting for you to type is cut to 2 seconds, and any other gap (sleep, usage-limit waits) is capped at 10 minutes.
 - Tool bars are as long as the call took. Thinking, message and user bars are instants, drawn at most 15 seconds long.

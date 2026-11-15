@@ -3,7 +3,7 @@ import { createRoot } from 'react-dom/client';
 import type { Race } from '../src/race.ts';
 import { Scene } from './Scene.tsx';
 import { Hud } from './Hud.tsx';
-import { init, seekBy, togglePlay, useRace, type Cam } from './store.ts';
+import { init, seekBy, toggleLanes, togglePlay, useRace, type Cam } from './store.ts';
 import './style.css';
 
 const CAMS: Cam[] = ['overview', 'follow', 'top'];
@@ -18,7 +18,7 @@ function App() {
         togglePlay();
       } else if (e.key === 'ArrowRight') seekBy(0.02);
       else if (e.key === 'ArrowLeft') seekBy(-0.02);
-      else if (e.key === 'l' || e.key === 'L') s.set({ lanesOpen: !s.lanesOpen });
+      else if (e.key === 'l' || e.key === 'L') toggleLanes();
       else if (e.key === 'Escape') s.set({ selected: null, selFile: null });
       else if (CAMS[Number(e.key) - 1]) s.set({ cam: CAMS[Number(e.key) - 1] });
     };

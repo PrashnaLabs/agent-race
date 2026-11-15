@@ -17,7 +17,6 @@ export const KIND_COLOR: Record<Kind, string> = {
 };
 export const FAIL_COLOR = '#ef4444';
 export const AGENT_COLOR: Record<Agent, string> = { claude: '#e8825f', codex: '#7dd3fc' };
-export const BOTH_COLOR = '#c084fc';
 export const AGENT_NAME: Record<Agent, string> = { claude: 'Claude Code', codex: 'Codex' };
 export const SPEEDS = [1, 10, 50, 200, 1000];
 export const evColor = (e: RaceEvent) => (e.ok === false ? FAIL_COLOR : KIND_COLOR[e.kind]);
@@ -38,7 +37,7 @@ type State = {
   playing: boolean;
   speed: number;
   cam: Cam;
-  lanesOpen: boolean; // timeline expanded to full swimlanes
+  tlH: number; // timeline panel height in px; tall enough = full swimlanes
   metric: Metric; // what tile height shows
   hidden: Kind[];
   selected: RaceEvent | null;
@@ -71,7 +70,7 @@ export const useRace = create<State>()((set) => ({
   playing: false,
   speed: 50,
   cam: 'overview',
-  lanesOpen: false,
+  tlH: storedTlH(),
   metric: 'touches',
   hidden: [],
   selected: null,
@@ -79,6 +78,30 @@ export const useRace = create<State>()((set) => ({
   hover: null,
   set: (p) => set(p),
 }));
+
+// Timeline panel sizing. Above TL_FULL the strip turns into labeled, zoomable swimlanes.
+export const TL_MIN = 96;
+export const TL_DEFAULT = 190;
+export const TL_FULL = 320;
+const TL_KEY = 'agent-race:tlH';
+export const tlMax = () => Math.max(TL_FULL, innerHeight - 100); // leave room for controls + a top margin
+export const isFull = (h: number) => h >= TL_FULL;
+function storedTlH() {
+  try {
+    const v = Number(localStorage.getItem(TL_KEY));
+    return v ? Math.min(Math.max(v, TL_MIN), tlMax()) : TL_DEFAULT;
+  } catch {
+    return TL_DEFAULT;
+  }
+}
+export function setTlH(h: number) {
+  const tlH = Math.round(Math.min(Math.max(h, TL_MIN), tlMax()));
+  useRace.getState().set({ tlH });
+  try {
+    localStorage.setItem(TL_KEY, String(tlH));
+  } catch {} // per-viewer convenience only
+}
+export const toggleLanes = () => setTlH(isFull(useRace.getState().tlH) ? TL_DEFAULT : tlMax());
 
 export function setCollapse(collapse: boolean) {
   const s = useRace.getState();
@@ -103,7 +126,7 @@ export function init(race: Race) {
     axis,
     time: Number(h.get('t')) || 0,
     ...(cam && ['overview', 'follow', 'top'].includes(cam) && { cam }),
-    lanesOpen: h.get('lanes') === '1',
+    ...(h.get('lanes') === '1' && { tlH: tlMax() }),
     ...(['touches', 'tokens', 'time'].includes(h.get('h') ?? '') && { metric: h.get('h') as Metric }),
     // Replay the (idle-collapsed) session in ~45s.
     speed: SPEEDS.find((s) => axis.total / s <= 45_000) ?? SPEEDS.at(-1)!,
