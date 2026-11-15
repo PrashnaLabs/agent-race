@@ -1,0 +1,776 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Agent Race Prototypes</title>
+<style>
+  :root {
+    --bg: #07090d;
+    --panel: #0e131c;
+    --panel-2: #131a26;
+    --line: rgb(148 163 184 / 0.16);
+    --text: #e6e9ef;
+    --muted: #8a93a6;
+    --mono: ui-monospace, 'SF Mono', Menlo, monospace;
+    color-scheme: dark;
+    font: 13px/1.4 system-ui, -apple-system, 'Segoe UI', sans-serif;
+    color: var(--text);
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); overflow: hidden; }
+  body { display: grid; grid-template-rows: 48px 1fr 56px; }
+  button, select { font: inherit; color: inherit; }
+  button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px solid #7dd3fc; outline-offset: 2px; }
+
+  header { display: flex; align-items: center; gap: 16px; padding: 0 14px; border-bottom: 1px solid var(--line); background: var(--panel); min-width: 0; }
+  .brand { font-weight: 650; letter-spacing: 0.02em; white-space: nowrap; }
+  #tabs { display: flex; gap: 2px; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 2px; }
+  #tabs button { border: 0; background: none; padding: 5px 12px; border-radius: 6px; color: var(--muted); cursor: pointer; white-space: nowrap; }
+  #tabs button[aria-selected='true'] { background: var(--panel-2); color: var(--text); }
+  #legend { display: flex; gap: 12px; margin-left: auto; overflow: hidden; flex-wrap: nowrap; }
+  #legend span { display: inline-flex; align-items: center; gap: 5px; color: var(--muted); font-size: 12px; white-space: nowrap; }
+  #legend i { width: 9px; height: 9px; border-radius: 2px; display: inline-block; }
+
+  main { position: relative; display: grid; grid-template-rows: 1fr 168px; min-height: 0; }
+  main.full { grid-template-rows: 0 1fr; padding-top: 40px; }
+  #stage { position: relative; overflow: hidden; min-height: 0; }
+  #stage canvas { display: block; }
+  .labels { position: absolute; inset: 0; pointer-events: none; }
+  #timeline { width: 100%; height: 100%; display: block; border-top: 1px solid var(--line); background: var(--panel); cursor: crosshair; touch-action: none; }
+  main.full #timeline { border-top: 0; cursor: grab; }
+  #hint { position: absolute; left: 14px; top: 10px; margin: 0; color: var(--muted); font-size: 12px; pointer-events: none; max-width: min(560px, 60%); }
+
+  footer { display: flex; align-items: center; gap: 12px; padding: 0 14px; border-top: 1px solid var(--line); background: var(--panel); min-width: 0; }
+  #play { width: 34px; height: 34px; border-radius: 50%; border: 0; background: var(--text); color: var(--bg); cursor: pointer; flex: none; }
+  #clock { font: 13px var(--mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
+  #scrub { flex: 1; min-width: 120px; accent-color: #7dd3fc; }
+  select { background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px; padding: 4px 6px; }
+  footer label { display: flex; align-items: center; gap: 6px; color: var(--muted); white-space: nowrap; }
+  #stats { display: flex; gap: 14px; font: 12px var(--mono); white-space: nowrap; }
+
+  #detail { position: fixed; right: 12px; top: 60px; bottom: 68px; width: min(370px, calc(100% - 24px)); background: rgb(14 19 28 / 0.94); border: 1px solid var(--line); border-radius: 10px; padding: 12px; display: flex; flex-direction: column; gap: 10px; backdrop-filter: blur(10px); z-index: 5; }
+  #detail[hidden] { display: none; }
+  #detail header { all: unset; display: flex; align-items: center; gap: 8px; }
+  #detail .chip { font: 600 12px var(--mono); }
+  #detail .x { margin-left: auto; border: 0; background: none; font-size: 20px; line-height: 1; color: var(--muted); cursor: pointer; }
+  #detail h3 { margin: 0; font: 500 13px/1.4 var(--mono); word-break: break-word; }
+  #detail dl { display: grid; grid-template-columns: auto 1fr; gap: 3px 14px; margin: 0; font-size: 12px; }
+  #detail dt { color: var(--muted); }
+  #detail dd { margin: 0; font-family: var(--mono); word-break: break-all; }
+  #detail pre { flex: 1; margin: 0; overflow: auto; padding: 10px; border-radius: 6px; background: rgb(0 0 0 / 0.4); font: 11px/1.5 var(--mono); white-space: pre-wrap; word-break: break-word; color: #c4cad6; }
+  #detail ol { flex: 1; overflow: auto; margin: 0; padding: 0; list-style: none; }
+  #detail li button { all: unset; display: grid; grid-template-columns: 10px 52px 1fr; gap: 8px; align-items: center; width: 100%; padding: 4px 6px; border-radius: 4px; cursor: pointer; font: 11px var(--mono); }
+  #detail li button:hover { background: rgb(255 255 255 / 0.06); }
+  #detail li i { width: 8px; height: 8px; border-radius: 50%; }
+  #detail li span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .jump { align-self: flex-start; border: 1px solid var(--line); background: rgb(255 255 255 / 0.05); border-radius: 6px; padding: 4px 10px; font-size: 12px; cursor: pointer; }
+
+  #tip { position: fixed; z-index: 10; pointer-events: none; max-width: 380px; padding: 6px 9px; border-radius: 6px; background: rgb(14 19 28 / 0.95); border: 1px solid var(--line); font: 12px var(--mono); }
+  #tip small { display: block; color: var(--muted); font-size: 11px; margin-top: 2px; }
+
+  .lbl { font: 11px var(--mono); color: #9aa6bd; white-space: nowrap; pointer-events: none; }
+  .lbl.dir { color: #6f7b93; font-size: 10px; }
+  .lbl.agent { padding: 2px 7px; border-radius: 5px; background: rgb(7 9 13 / 0.85); border: 1px solid var(--line); color: var(--text); max-width: 240px; overflow: hidden; text-overflow: ellipsis; }
+  .lbl.big { font: 700 13px system-ui; letter-spacing: 0.08em; text-transform: uppercase; }
+
+  .empty { display: grid; place-content: center; height: 100vh; text-align: center; color: var(--muted); }
+  .empty code { color: #7dd3fc; font-family: var(--mono); }
+
+  @media (max-width: 760px) {
+    #legend, #stats { display: none; }
+    main { grid-template-rows: 1fr 130px; }
+  }
+</style>
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"
+} }
+</script>
+</head>
+<body>
+<header>
+  <span class="brand">Agent Race · prototypes</span>
+  <nav id="tabs" role="tablist" aria-label="Visualization">
+    <button role="tab" data-view="map">1 · Code map</button>
+    <button role="tab" data-view="lanes">2 · Swimlanes</button>
+    <button role="tab" data-view="helix">3 · Helix</button>
+  </nav>
+  <div id="legend"></div>
+</header>
+<main id="main">
+  <div id="stage"></div>
+  <canvas id="timeline" aria-label="Timeline"></canvas>
+  <p id="hint"></p>
+</main>
+<footer>
+  <button id="play" aria-label="Play">▶</button>
+  <span id="clock"></span>
+  <input id="scrub" type="range" min="0" max="1000" step="any" aria-label="Scrub" />
+  <select id="speed" aria-label="Speed"></select>
+  <label><input type="checkbox" id="collapse" checked /> Collapse idle</label>
+  <span id="stats"></span>
+</footer>
+<aside id="detail" hidden></aside>
+<div id="tip" hidden></div>
+
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { CSS2DRenderer, CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
+
+const RACE = /*RACE_JSON*/null;
+if (!RACE) {
+  document.body.innerHTML = '<div class="empty"><p>No data embedded.</p><p>Run <code>node demos/build.ts --claude &lt;file&gt; --codex &lt;file&gt;</code></p></div>';
+  throw new Error('no data');
+}
+
+// ───────────────────────── shared data ─────────────────────────
+const KINDS = ['user', 'thinking', 'message', 'read', 'search', 'edit', 'bash', 'tool'];
+const KIND_COLOR = { user: '#facc15', thinking: '#a78bfa', message: '#e2e8f0', read: '#60a5fa', search: '#22d3ee', edit: '#4ade80', bash: '#fb923c', tool: '#f472b6' };
+const FAIL = '#ef4444';
+const AGENT_COLOR = { claude: '#e8825f', codex: '#7dd3fc' };
+const AGENT_NAME = { claude: 'Claude Code', codex: 'Codex' };
+const BOTH = '#c084fc';
+const BG = '#07090d';
+
+const agents = ['claude', 'codex'].filter((a) => RACE.agents[a]);
+const lanes = Object.fromEntries(agents.map((a) => [a, RACE.events.filter((e) => e.agent === a).sort((x, y) => x.step - y.step)]));
+const maxT = Math.max(...agents.map((a) => RACE.agents[a].totalMs));
+const evColor = (e) => (e.ok === false ? FAIL : KIND_COLOR[e.kind]);
+
+const fmt = (ms) => {
+  const s = Math.floor(ms / 1000), h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), ss = String(s % 60).padStart(2, '0');
+  return h ? `${h}:${String(m).padStart(2, '0')}:${ss}` : `${m}:${ss}`;
+};
+const fmtDur = (ms) => (ms < 1000 ? `${Math.round(ms)}ms` : ms < 60_000 ? `${(ms / 1000).toFixed(1)}s` : fmt(ms));
+function upper(arr, t, key = (x) => x.t) { // count of items with key <= t
+  let lo = 0, hi = arr.length;
+  while (lo < hi) { const mid = (lo + hi) >> 1; if (key(arr[mid]) <= t) lo = mid + 1; else hi = mid; }
+  return lo;
+}
+const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
+
+// ───────────────── time axis: real ms <-> visual ms (idle collapsed) ─────────────────
+// Stretches where neither agent does anything for > GAP are squeezed to GAP_W on screen and in playback.
+const GAP = 45_000, GAP_W = 5_000;
+let segs = [];
+function buildAxis(collapse) {
+  if (!collapse) { segs = [{ t0: 0, t1: maxT, v0: 0 }]; return; }
+  const iv = RACE.events.map((e) => [e.t, e.t + Math.max(e.dur, 1500)]).sort((a, b) => a[0] - b[0]);
+  const merged = [];
+  for (const [s, e] of iv) {
+    const last = merged.at(-1);
+    if (last && s <= last[1] + GAP) last[1] = Math.max(last[1], e);
+    else merged.push([s, e]);
+  }
+  merged[0][0] = 0;
+  merged.at(-1)[1] = Math.max(merged.at(-1)[1], maxT);
+  segs = [];
+  let v = 0;
+  merged.forEach(([s, e], i) => { if (i) v += GAP_W; segs.push({ t0: s, t1: e, v0: v }); v += e - s; });
+}
+const vTotal = () => { const s = segs.at(-1); return s.v0 + s.t1 - s.t0; };
+function toV(t) {
+  for (let i = segs.length - 1; i >= 0; i--) {
+    const s = segs[i];
+    if (t < s.t0) continue;
+    if (t <= s.t1) return s.v0 + t - s.t0;
+    const n = segs[i + 1];
+    return n ? s.v0 + s.t1 - s.t0 + ((t - s.t1) / (n.t0 - s.t1)) * GAP_W : s.v0 + s.t1 - s.t0;
+  }
+  return 0;
+}
+function toT(v) {
+  for (let i = segs.length - 1; i >= 0; i--) {
+    const s = segs[i], len = s.t1 - s.t0;
+    if (v < s.v0) continue;
+    if (v <= s.v0 + len) return s.t0 + v - s.v0;
+    const n = segs[i + 1];
+    return n ? s.t1 + ((v - s.v0 - len) / GAP_W) * (n.t0 - s.t1) : s.t1;
+  }
+  return 0;
+}
+const inGap = (t) => !segs.some((s) => t >= s.t0 && t <= s.t1);
+
+// ───────────────────────── state ─────────────────────────
+const S = { t: 0, playing: false, speed: 50, view: 'map', sel: null, selFile: null, hover: null };
+buildAxis(true);
+const SPEEDS = [1, 10, 50, 200, 1000];
+S.speed = SPEEDS.find((s) => vTotal() / s <= 45_000) ?? 1000;
+
+// ───────────────────────── DOM chrome ─────────────────────────
+const $ = (id) => document.getElementById(id);
+$('legend').innerHTML =
+  KINDS.map((k) => `<span><i style="background:${KIND_COLOR[k]}"></i>${k}</span>`).join('') +
+  `<span><i style="background:${FAIL}"></i>failed</span>`;
+$('speed').innerHTML = SPEEDS.map((s) => `<option value="${s}" ${s === S.speed ? 'selected' : ''}>${s}×</option>`).join('');
+$('speed').onchange = (e) => (S.speed = Number(e.target.value));
+$('collapse').onchange = (e) => { buildAxis(e.target.checked); lanesView.reset(); };
+const togglePlay = () => {
+  if (!S.playing && toV(S.t) >= vTotal() - 1) S.t = 0;
+  S.playing = !S.playing;
+};
+$('play').onclick = togglePlay;
+$('scrub').oninput = (e) => { S.t = toT((e.target.value / 1000) * vTotal()); };
+
+const HINTS = {
+  map: 'Repo as a city. Tiles are files, grouped by folder. Height grows with reads and edits; color shows who touched it (orange Claude, blue Codex, violet both). Lights are the agents, trails are their last hops. Drag to orbit, click a tile.',
+  lanes: 'Dense swimlanes: one band per agent, one row per event type. Scroll to zoom, drag to pan, click a bar for details, double-click to reset zoom. Hatched bands are idle gaps squeezed out.',
+  helix: 'Each tower is one session coiled by step: 30 events per turn, rising upward. Block height is tokens, depth is duration. Drag to orbit, click a block.',
+};
+
+// ───────────────────────── detail panel + tooltip ─────────────────────────
+const detail = $('detail');
+function showEvent(e) {
+  S.sel = e; S.selFile = null;
+  detail.hidden = false;
+  detail.innerHTML = `
+    <header><span class="chip" style="color:${evColor(e)}">${esc(e.tool ?? e.kind)}</span>
+      <span style="color:${AGENT_COLOR[e.agent]}">${AGENT_NAME[e.agent]}</span>
+      <button class="x" aria-label="Close">×</button></header>
+    <h3>${esc(e.summary)}</h3>
+    <dl><dt>at</dt><dd>${fmt(e.t)}</dd><dt>took</dt><dd>${fmtDur(e.dur)}</dd><dt>step</dt><dd>#${e.step + 1}</dd>
+      <dt>tokens</dt><dd>${e.tokens?.toLocaleString() ?? '—'}</dd>
+      ${e.ok != null ? `<dt>result</dt><dd style="color:${e.ok ? KIND_COLOR.edit : FAIL}">${e.ok ? 'ok' : 'error'}</dd>` : ''}
+      ${e.files?.length ? `<dt>files</dt><dd>${e.files.map(esc).join('<br>')}</dd>` : ''}</dl>
+    <button class="jump">Jump playhead here</button>
+    ${e.detail ? `<pre>${esc(e.detail)}</pre>` : ''}`;
+  detail.querySelector('.x').onclick = closeDetail;
+  detail.querySelector('.jump').onclick = () => { S.t = e.t; S.playing = false; };
+}
+function showFile(f) {
+  S.selFile = f; S.sel = null;
+  detail.hidden = false;
+  const reads = f.touches.filter((x) => !x.edit).length, edits = f.touches.length - reads;
+  detail.innerHTML = `
+    <header><span class="chip">file</span><button class="x" aria-label="Close">×</button></header>
+    <h3>${esc(f.path)}</h3>
+    <dl><dt>touches</dt><dd>${f.touches.length} (${reads} read, ${edits} edit)</dd>
+      ${agents.map((a) => `<dt style="color:${AGENT_COLOR[a]}">${AGENT_NAME[a]}</dt><dd>${f.touches.filter((x) => x.agent === a).length}</dd>`).join('')}</dl>
+    <ol>${f.touches.map((x, i) => `<li><button data-i="${i}"><i style="background:${AGENT_COLOR[x.agent]}"></i>${fmt(x.t)}<span>${esc(x.ev.summary)}</span></button></li>`).join('')}</ol>`;
+  detail.querySelector('.x').onclick = closeDetail;
+  detail.querySelectorAll('li button').forEach((b) => (b.onclick = () => { const ev = f.touches[b.dataset.i].ev; S.t = ev.t; S.playing = false; showEvent(ev); }));
+}
+function closeDetail() { detail.hidden = true; S.sel = null; S.selFile = null; }
+
+const tip = $('tip');
+function showTip(x, y, html) {
+  if (!html) { tip.hidden = true; return; }
+  tip.hidden = false;
+  tip.innerHTML = html;
+  tip.style.left = `${Math.min(x + 14, innerWidth - tip.offsetWidth - 8)}px`;
+  tip.style.top = `${Math.min(y + 14, innerHeight - tip.offsetHeight - 8)}px`;
+}
+const evTip = (e) => `<span style="color:${evColor(e)}">■</span> ${esc(e.summary)}<small>${AGENT_NAME[e.agent]} · ${fmt(e.t)} · ${fmtDur(e.dur)}${e.tokens ? ` · ${e.tokens} tok` : ''}</small>`;
+
+// ───────────────────────── 2D timeline (compact strip + full swimlanes) ─────────────────────────
+const tl = $('timeline'), ctx = tl.getContext('2d');
+const lanesView = {
+  v0: 0, v1: 1, hits: [], drag: null,
+  reset() { this.v0 = 0; this.v1 = vTotal(); },
+};
+lanesView.reset();
+const LABEL_W = () => (S.view === 'lanes' ? 118 : 92);
+const plotW = () => tl.clientWidth - LABEL_W() - 14;
+const vx = (v) => LABEL_W() + ((v - lanesView.v0) / (lanesView.v1 - lanesView.v0)) * plotW();
+const xv = (x) => lanesView.v0 + ((x - LABEL_W()) / plotW()) * (lanesView.v1 - lanesView.v0);
+
+function niceStep(span) {
+  const steps = [1e3, 5e3, 10e3, 30e3, 60e3, 120e3, 300e3, 600e3, 900e3, 1800e3, 3600e3, 7200e3];
+  return steps.find((s) => span / s <= 9) ?? 7200e3;
+}
+
+function drawTimeline() {
+  const full = S.view === 'lanes';
+  if (!full) { lanesView.v0 = 0; lanesView.v1 = vTotal(); }
+  const dpr = Math.min(devicePixelRatio, 2), W = tl.clientWidth, H = tl.clientHeight;
+  if (!W || !H) return;
+  if (tl.width !== Math.round(W * dpr) || tl.height !== Math.round(H * dpr)) { tl.width = W * dpr; tl.height = H * dpr; }
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, W, H);
+  const AXIS = 22, LW = LABEL_W();
+  const laneH = (H - AXIS - 8) / agents.length;
+  const head = full ? 20 : 4;
+  const rowH = (laneH - head - 6) / KINDS.length;
+  lanesView.hits = [];
+
+  // idle gaps (hatched)
+  ctx.save();
+  ctx.beginPath(); ctx.rect(LW, 0, W - LW, H); ctx.clip();
+  for (let i = 0; i < segs.length - 1; i++) {
+    const a = vx(segs[i].v0 + segs[i].t1 - segs[i].t0), b = vx(segs[i + 1].v0);
+    ctx.fillStyle = 'rgba(255,255,255,0.035)';
+    ctx.fillRect(a, AXIS, b - a, H - AXIS);
+    ctx.strokeStyle = 'rgba(255,255,255,0.08)';
+    for (let x = a - H; x < b; x += 6) { ctx.beginPath(); ctx.moveTo(Math.max(x, a), AXIS + Math.max(0, a - x)); ctx.lineTo(Math.min(x + H, b), AXIS + Math.min(H, b - x)); ctx.stroke(); }
+    if (b - a > 46) { ctx.fillStyle = '#6f7b93'; ctx.font = '10px ui-monospace, monospace'; ctx.fillText(`${fmt(segs[i + 1].t0 - segs[i].t1)} idle`, a + 4, AXIS + 11); }
+  }
+  // time ticks (real time, skipping squeezed gaps)
+  const tA = toT(lanesView.v0), tB = toT(lanesView.v1), step = niceStep(tB - tA);
+  ctx.font = '10px ui-monospace, monospace';
+  let lastX = -1e9;
+  for (let t = Math.ceil(tA / step) * step; t <= tB; t += step) {
+    if (inGap(t)) continue;
+    const x = vx(toV(t));
+    ctx.fillStyle = 'rgba(255,255,255,0.05)'; ctx.fillRect(x, AXIS, 1, H - AXIS);
+    if (x - lastX > 48) { ctx.fillStyle = '#6f7b93'; ctx.fillText(fmt(t), x + 3, 14); lastX = x; }
+  }
+  ctx.restore();
+
+  // lanes
+  agents.forEach((a, li) => {
+    const top = AXIS + 4 + li * laneH;
+    ctx.fillStyle = li % 2 ? 'rgba(255,255,255,0.015)' : 'rgba(255,255,255,0.03)';
+    ctx.fillRect(0, top, W, laneH - 4);
+    ctx.fillStyle = AGENT_COLOR[a];
+    ctx.font = '600 12px system-ui, sans-serif';
+    ctx.fillText(AGENT_NAME[a], 10, top + (full ? 15 : Math.min(laneH / 2 + 4, 16)));
+    if (full) {
+      ctx.font = '10px ui-monospace, monospace';
+      KINDS.forEach((k, ki) => { if (rowH >= 9) { ctx.fillStyle = '#56607a'; ctx.fillText(k, 22, top + head + ki * rowH + rowH * 0.75); } });
+      const m = RACE.agents[a];
+      ctx.fillStyle = '#6f7b93';
+      ctx.fillText(`${m.steps} steps · ${fmt(m.totalMs)} · ${m.totalTokens.toLocaleString()} tok${m.model ? ` · ${m.model}` : ''}`, LW, top + 14);
+    }
+    ctx.save();
+    ctx.beginPath(); ctx.rect(LW, top, W - LW, laneH); ctx.clip();
+    for (const e of lanes[a]) {
+      const x = vx(toV(e.t)), x2 = vx(toV(e.t + e.dur));
+      if (x2 < LW || x > W) continue;
+      const w = Math.max(x2 - x, full ? 2 : 1.2);
+      const y = top + head + KINDS.indexOf(e.kind) * rowH;
+      const h = Math.max(rowH - (full ? 2 : 0.5), 1);
+      ctx.globalAlpha = e.t <= S.t ? 1 : 0.2;
+      ctx.fillStyle = evColor(e);
+      ctx.fillRect(x, y, w, h);
+      if (e === S.sel || e === S.hover) { ctx.globalAlpha = 1; ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.5; ctx.strokeRect(x - 1, y - 1, w + 2, h + 2); }
+      lanesView.hits.push([x, y, w, h, e]);
+    }
+    ctx.restore();
+    ctx.globalAlpha = 1;
+  });
+
+  // playhead
+  const px = vx(toV(S.t));
+  if (px >= LW) {
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(px - 0.75, AXIS - 4, 1.5, H - AXIS + 4);
+    ctx.beginPath(); ctx.moveTo(px - 5, AXIS - 8); ctx.lineTo(px + 5, AXIS - 8); ctx.lineTo(px, AXIS - 2); ctx.fill();
+  }
+}
+
+function hitAt(x, y) {
+  const hs = lanesView.hits;
+  for (let i = hs.length - 1; i >= 0; i--) {
+    const [hx, hy, w, h, e] = hs[i];
+    if (x >= hx - 2 && x <= hx + w + 2 && y >= hy && y <= hy + h) return e;
+  }
+  return null;
+}
+const clampView = () => {
+  const span = Math.min(Math.max(lanesView.v1 - lanesView.v0, 2000), vTotal());
+  lanesView.v0 = Math.min(Math.max(lanesView.v0, 0), vTotal() - span);
+  lanesView.v1 = lanesView.v0 + span;
+};
+tl.addEventListener('pointerdown', (ev) => {
+  tl.setPointerCapture(ev.pointerId);
+  lanesView.drag = { x: ev.offsetX, v0: lanesView.v0, v1: lanesView.v1, moved: false };
+  if (S.view !== 'lanes') S.t = toT(Math.max(0, xv(ev.offsetX)));
+});
+tl.addEventListener('pointermove', (ev) => {
+  const d = lanesView.drag;
+  if (d) {
+    const dx = ev.offsetX - d.x;
+    if (Math.abs(dx) > 3) d.moved = true;
+    if (S.view === 'lanes') {
+      const dv = (dx / plotW()) * (d.v1 - d.v0);
+      lanesView.v0 = d.v0 - dv; lanesView.v1 = d.v1 - dv; clampView();
+    } else S.t = toT(Math.min(Math.max(0, xv(ev.offsetX)), vTotal()));
+    return;
+  }
+  S.hover = hitAt(ev.offsetX, ev.offsetY);
+  showTip(ev.clientX, ev.clientY, S.hover && evTip(S.hover));
+});
+tl.addEventListener('pointerup', (ev) => {
+  const d = lanesView.drag; lanesView.drag = null;
+  if (!d || d.moved || S.view !== 'lanes') return;
+  const e = hitAt(ev.offsetX, ev.offsetY);
+  if (e) showEvent(e); else S.t = toT(Math.max(0, xv(ev.offsetX)));
+});
+tl.addEventListener('pointerleave', () => { S.hover = null; showTip(0, 0, null); });
+tl.addEventListener('wheel', (ev) => {
+  if (S.view !== 'lanes') return;
+  ev.preventDefault();
+  const f = Math.exp((ev.deltaY + ev.deltaX * 0) * 0.0015), c = xv(ev.offsetX);
+  lanesView.v0 = c - (c - lanesView.v0) * f; lanesView.v1 = c + (lanesView.v1 - c) * f; clampView();
+}, { passive: false });
+tl.addEventListener('dblclick', () => lanesView.reset());
+
+// ───────────────────────── 3D shared ─────────────────────────
+const stage = $('stage');
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+stage.append(renderer.domElement);
+const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+function baseScene() {
+  const scene = new THREE.Scene();
+  scene.background = new THREE.Color(BG);
+  scene.fog = new THREE.Fog(BG, 70, 190);
+  scene.add(new THREE.AmbientLight(0xffffff, 0.45));
+  scene.add(new THREE.HemisphereLight(0x9fb4ff, 0x0b0d12, 0.7));
+  const sun = new THREE.DirectionalLight(0xffffff, 1.3); sun.position.set(20, 40, 25); scene.add(sun);
+  return scene;
+}
+function makeView(camPos, target) {
+  const camera = new THREE.PerspectiveCamera(45, 1, 0.1, 1000);
+  camera.position.set(...camPos);
+  const controls = new OrbitControls(camera, renderer.domElement);
+  controls.target.set(...target);
+  controls.enableDamping = true;
+  controls.maxPolarAngle = Math.PI / 2.05;
+  controls.enabled = false;
+  const labels = new CSS2DRenderer();
+  labels.domElement.className = 'labels';
+  labels.domElement.style.display = 'none';
+  stage.append(labels.domElement);
+  return { camera, controls, labels };
+}
+const label = (text, cls) => { const d = document.createElement('div'); d.className = `lbl ${cls ?? ''}`; d.textContent = text; return new CSS2DObject(d); };
+
+// ───────────────────────── view 1: code map ─────────────────────────
+function squarify(items, x, y, w, h) {
+  items = items.filter((i) => i.weight > 0).sort((a, b) => b.weight - a.weight);
+  const total = items.reduce((s, i) => s + i.weight, 0), scale = (w * h) / total;
+  let rect = { x, y, w, h }, row = [], i = 0;
+  const worst = (r, side) => {
+    const areas = r.map((it) => it.weight * scale), s = areas.reduce((a, b) => a + b, 0);
+    return Math.max((side * side * Math.max(...areas)) / (s * s), (s * s) / (side * side * Math.min(...areas)));
+  };
+  const lay = (r) => {
+    const s = r.reduce((a, it) => a + it.weight * scale, 0);
+    if (rect.w >= rect.h) {
+      const cw = s / rect.h; let cy = rect.y;
+      for (const it of r) { const rh = (it.weight * scale) / cw; it.rect = { x: rect.x, y: cy, w: cw, h: rh }; cy += rh; }
+      rect = { x: rect.x + cw, y: rect.y, w: rect.w - cw, h: rect.h };
+    } else {
+      const rh = s / rect.w; let cx = rect.x;
+      for (const it of r) { const rw = (it.weight * scale) / rh; it.rect = { x: cx, y: rect.y, w: rw, h: rh }; cx += rw; }
+      rect = { x: rect.x, y: rect.y + rh, w: rect.w, h: rect.h - rh };
+    }
+  };
+  while (i < items.length) {
+    const side = Math.min(rect.w, rect.h);
+    if (!row.length || worst([...row, items[i]], side) <= worst(row, side)) row.push(items[i++]);
+    else { lay(row); row = []; }
+  }
+  if (row.length) lay(row);
+  return items;
+}
+
+function buildMap() {
+  const v = makeView([0, 40, 36], [0, 0, 3]);
+  const scene = baseScene();
+  const ground = new THREE.Mesh(new THREE.PlaneGeometry(400, 400), new THREE.MeshStandardMaterial({ color: '#0a0d13', roughness: 1 }));
+  ground.rotation.x = -Math.PI / 2; ground.position.y = -0.05; scene.add(ground);
+
+  // files + their touches over time
+  const fileMap = new Map();
+  for (const e of [...RACE.events].sort((a, b) => a.t - b.t))
+    for (const p of e.files ?? []) {
+      if (!fileMap.has(p)) fileMap.set(p, { path: p, touches: [] });
+      fileMap.get(p).touches.push({ t: e.t, agent: e.agent, edit: e.kind === 'edit', ev: e });
+    }
+  const files = [...fileMap.values()];
+  for (const f of files) {
+    let r = 0, ed = 0;
+    f.readsAt = []; f.editsAt = [];
+    for (const x of f.touches) { x.edit ? ed++ : r++; f.readsAt.push(r); f.editsAt.push(ed); }
+    f.first = Object.fromEntries(agents.map((a) => [a, f.touches.find((x) => x.agent === a)?.t ?? Infinity]));
+    f.weight = 1 + Math.sqrt(f.touches.length) * 2;
+  }
+  // folders (depth <= 2) -> squarified treemap, then files inside each folder
+  const groups = new Map();
+  for (const f of files) {
+    const parts = f.path.split('/');
+    const key = parts.length > 1 ? parts.slice(0, Math.min(2, parts.length - 1)).join('/') : '(root)';
+    if (!groups.has(key)) groups.set(key, { key, files: [], weight: 0 });
+    const g = groups.get(key); g.files.push(f); g.weight += f.weight;
+  }
+  const MW = 64, MH = 38;
+  if (!files.length) { const l = label('No file paths found in these sessions', 'big'); l.position.set(0, 1, 0); scene.add(l); }
+  const tiles = [];
+  const plateMat = new THREE.MeshStandardMaterial({ color: '#111723', roughness: 0.9 });
+  for (const g of squarify([...groups.values()], -MW / 2, -MH / 2, MW, MH)) {
+    const r = g.rect, pad = 0.35;
+    const plate = new THREE.Mesh(new THREE.BoxGeometry(Math.max(r.w - pad, 0.1), 0.08, Math.max(r.h - pad, 0.1)), plateMat);
+    plate.position.set(r.x + r.w / 2, 0, r.y + r.h / 2);
+    scene.add(plate);
+    const edge = new THREE.LineSegments(new THREE.EdgesGeometry(plate.geometry), new THREE.LineBasicMaterial({ color: '#273246' }));
+    edge.position.copy(plate.position); scene.add(edge);
+    if (r.w > 3 && r.h > 1.5) {
+      const l = label(g.key, 'dir'); l.position.set(r.x + pad, 0.1, r.y + pad); l.center.set(0, 0); scene.add(l);
+    }
+    const inner = { x: r.x + 0.5, y: r.y + 1.0, w: Math.max(r.w - 1.0, 0.2), h: Math.max(r.h - 1.5, 0.2) };
+    for (const f of squarify(g.files, inner.x, inner.y, inner.w, inner.h)) {
+      const fr = f.rect, gap = Math.min(0.18, fr.w * 0.2, fr.h * 0.2);
+      const mesh = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), new THREE.MeshStandardMaterial({ color: '#1b2232', roughness: 0.5, metalness: 0.1 }));
+      mesh.scale.set(Math.max(fr.w - gap * 2, 0.05), 0.06, Math.max(fr.h - gap * 2, 0.05));
+      mesh.position.set(fr.x + fr.w / 2, 0.03, fr.y + fr.h / 2);
+      mesh.userData.file = f;
+      f.mesh = mesh;
+      scene.add(mesh); tiles.push(mesh);
+    }
+  }
+
+  // agents: glowing orb, label, trail of last hops
+  const TRAIL = 14;
+  const bots = agents.map((a, i) => {
+    const color = new THREE.Color(AGENT_COLOR[a]);
+    const g = new THREE.Group();
+    g.add(new THREE.Mesh(new THREE.SphereGeometry(0.45, 24, 16), new THREE.MeshBasicMaterial({ color })));
+    const halo = new THREE.Mesh(new THREE.SphereGeometry(0.85, 24, 16), new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.18, depthWrite: false }));
+    g.add(halo);
+    const light = new THREE.PointLight(color, 30, 9); g.add(light);
+    const l = label('', 'agent'); l.position.set(0, 1.1, 0); g.add(l);
+    l.element.style.borderColor = AGENT_COLOR[a];
+    g.position.set(0, 3, 0);
+    scene.add(g);
+    const hops = lanes[a].filter((e) => e.files?.length && fileMap.get(e.files[0])?.mesh).map((e) => ({ t: e.t, file: fileMap.get(e.files[0]) }));
+    const trail = new THREE.Line(new THREE.BufferGeometry(), new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.9 }));
+    scene.add(trail);
+    return { a, g, halo, label: l, hops, trail, lastHop: -1, offset: agents.length > 1 ? (i ? 0.5 : -0.5) : 0, color };
+  });
+
+  const colFor = (f, t) => {
+    const by = agents.filter((a) => f.first[a] <= t);
+    return by.length === 2 ? BOTH : by.length ? AGENT_COLOR[by[0]] : null;
+  };
+  const tmp = new THREE.Color(), white = new THREE.Color('#ffffff');
+  const top = (f) => new THREE.Vector3(f.mesh.position.x, f.mesh.scale.y, f.mesh.position.z);
+
+  function update(dt) {
+    const k = 1 - Math.exp(-dt * 8);
+    const flashV = 500 * S.speed;
+    for (const f of files) {
+      const n = upper(f.touches, S.t);
+      const reads = n ? f.readsAt[n - 1] : 0, edits = n ? f.editsAt[n - 1] : 0;
+      const target = n ? 0.3 + Math.log2(1 + reads) * 0.45 + Math.log2(1 + edits) * 1.1 : 0.06;
+      f.mesh.scale.y += (target - f.mesh.scale.y) * k;
+      f.mesh.position.y = f.mesh.scale.y / 2;
+      const c = colFor(f, S.t), m = f.mesh.material;
+      m.color.set(c ?? '#1b2232');
+      const recent = n && toV(S.t) - toV(f.touches[n - 1].t) < flashV;
+      m.emissive.set(c ?? '#000').multiplyScalar(recent ? 0.9 : edits ? 0.25 : 0.05);
+      if (f === S.selFile || (S.sel && S.sel.files?.includes(f.path)) || f === hoverFile) m.emissive.lerp(white, 0.5);
+    }
+    for (const b of bots) {
+      const h = upper(b.hops, S.t) - 1;
+      const f = h >= 0 ? b.hops[h].file : null;
+      const want = f ? top(f).add(new THREE.Vector3(b.offset, 1.3, 0)) : new THREE.Vector3(b.offset * 4, 3, MH / 2 + 3);
+      b.g.position.lerp(want, 1 - Math.exp(-dt * 6));
+      b.g.position.y += Math.sin(performance.now() / 300 + b.offset * 4) * 0.004;
+      b.halo.scale.setScalar(1 + Math.sin(performance.now() / 200) * 0.08);
+      const ev = lanes[b.a][upper(lanes[b.a], S.t) - 1];
+      const done = S.t >= RACE.agents[b.a].totalMs;
+      b.label.element.textContent = done ? `${AGENT_NAME[b.a]} · finished` : ev ? ev.summary : AGENT_NAME[b.a];
+      if (h !== b.lastHop) { // rebuild trail as arcs between the last few files
+        b.lastHop = h;
+        const pts = [], cols = [];
+        const from = Math.max(0, h - TRAIL);
+        for (let j = from; j < h; j++) {
+          const p0 = top(b.hops[j].file).add(new THREE.Vector3(b.offset, 0.4, 0)), p1 = top(b.hops[j + 1].file).add(new THREE.Vector3(b.offset, 0.4, 0));
+          const mid = p0.clone().add(p1).multiplyScalar(0.5); mid.y += 1.5 + p0.distanceTo(p1) * 0.18;
+          const curve = new THREE.QuadraticBezierCurve3(p0, mid, p1);
+          const fade = (j - from + 1) / (h - from);
+          for (const p of curve.getPoints(14)) { pts.push(p); tmp.copy(b.color).multiplyScalar(0.15 + fade * 0.85); cols.push(tmp.r, tmp.g, tmp.b); }
+        }
+        b.trail.geometry.dispose();
+        b.trail.geometry = new THREE.BufferGeometry().setFromPoints(pts);
+        b.trail.geometry.setAttribute('color', new THREE.Float32BufferAttribute(cols, 3));
+      }
+    }
+  }
+  let hoverFile = null;
+  function pick(ray, click, cx, cy) {
+    const hit = ray.intersectObjects(tiles)[0];
+    hoverFile = hit?.object.userData.file ?? null;
+    if (click) { if (hoverFile) showFile(hoverFile); return; }
+    const f = hoverFile;
+    showTip(cx, cy, f && `${esc(f.path)}<small>${agents.map((a) => `${AGENT_NAME[a]} ${f.touches.filter((x) => x.agent === a && x.t <= S.t).length}`).join(' · ')} touches so far</small>`);
+  }
+  return { ...v, scene, update, pick, onLeave: () => (hoverFile = null) };
+}
+
+// ───────────────────────── view 3: helix towers ─────────────────────────
+function buildHelix() {
+  const PER_TURN = 30, R = 5.5, PITCH = 1.2;
+  const maxSteps = Math.max(...agents.map((a) => lanes[a].length));
+  const H = (maxSteps / PER_TURN) * PITCH;
+  const v = makeView([0, H * 0.6 + 5, H * 0.55 + 21], [0, H * 0.4, 0]);
+  const scene = baseScene();
+  const ground = new THREE.Mesh(new THREE.CircleGeometry(60, 64), new THREE.MeshStandardMaterial({ color: '#0a0d13', roughness: 1 }));
+  ground.rotation.x = -Math.PI / 2; scene.add(ground);
+  const ghost = new THREE.Color('#252d3d'), white = new THREE.Color('#ffffff');
+  const towers = agents.map((a, i) => {
+    const cx = agents.length > 1 ? (i ? 9.5 : -9.5) : 0;
+    const evs = lanes[a];
+    const mesh = new THREE.InstancedMesh(new THREE.BoxGeometry(1, 1, 1), new THREE.MeshStandardMaterial({ roughness: 0.4, metalness: 0.1 }), evs.length);
+    const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), p = new THREE.Vector3(), s = new THREE.Vector3();
+    const place = evs.map((e, j) => {
+      const ang = (j / PER_TURN) * Math.PI * 2, y = (j / PER_TURN) * PITCH;
+      const h = Math.min(0.2 + (e.tokens ? Math.log10(1 + e.tokens) * 0.22 : 0), PITCH * 0.85);
+      const d = 0.5 + Math.min(Math.log10(1 + e.dur / 1000) * 0.9, 2.2);
+      return { ang, y, h, d };
+    });
+    place.forEach(({ ang, y, h, d }, j) => {
+      p.set(cx + (R + d / 2) * Math.cos(ang), y + h / 2, (R + d / 2) * Math.sin(ang));
+      q.setFromAxisAngle(new THREE.Vector3(0, 1, 0), -ang);
+      s.set(d, h, ((2 * Math.PI * R) / PER_TURN) * 0.86);
+      mesh.setMatrixAt(j, m4.compose(p, q, s));
+      mesh.setColorAt(j, ghost);
+    });
+    mesh.userData.evs = evs;
+    scene.add(mesh);
+    const color = new THREE.Color(AGENT_COLOR[a]);
+    const core = new THREE.Mesh(new THREE.CylinderGeometry(0.35, 0.35, 1, 20), new THREE.MeshBasicMaterial({ color }));
+    core.position.x = cx; scene.add(core);
+    const shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.12, H + 1, 12), new THREE.MeshBasicMaterial({ color: '#1d2433' }));
+    shaft.position.set(cx, (H + 1) / 2, 0); scene.add(shaft);
+    const ring = new THREE.Mesh(new THREE.TorusGeometry(R + 0.1, 0.05, 8, 96), new THREE.MeshBasicMaterial({ color }));
+    ring.rotation.x = Math.PI / 2; ring.position.x = cx; scene.add(ring);
+    const base = label(AGENT_NAME[a], 'big'); base.element.style.color = AGENT_COLOR[a]; base.position.set(cx, -0.6, R + 3); scene.add(base);
+    const now = label('', 'agent'); now.element.style.borderColor = AGENT_COLOR[a]; scene.add(now);
+    const light = new THREE.PointLight(color, 40, 14); scene.add(light);
+    return { a, cx, evs, mesh, place, core, ring, now, light };
+  });
+  const sel = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), new THREE.MeshBasicMaterial({ color: '#fff', wireframe: true }));
+  scene.add(sel);
+  const c = new THREE.Color();
+  let hoverEv = null;
+  function update(dt) {
+    const flashV = 500 * S.speed;
+    sel.visible = false;
+    for (const tw of towers) {
+      const n = upper(tw.evs, S.t);
+      tw.evs.forEach((e, j) => {
+        if (j >= n) c.copy(ghost);
+        else {
+          c.set(evColor(e));
+          if (toV(S.t) - toV(e.t) < flashV) c.multiplyScalar(1.8);
+        }
+        if (e === hoverEv || e === S.sel) c.lerp(white, 0.5);
+        tw.mesh.setColorAt(j, c);
+        if (e === S.sel) { const m = new THREE.Matrix4(); tw.mesh.getMatrixAt(j, m); m.decompose(sel.position, sel.quaternion, sel.scale); sel.scale.multiplyScalar(1.15); sel.visible = true; }
+      });
+      tw.mesh.instanceColor.needsUpdate = true;
+      const j = Math.max(0, n - 1), pl = tw.place[j] ?? { y: 0, ang: 0 };
+      const frac = n ? Math.min(1, (S.t - tw.evs[j].t) / Math.max(1, (tw.evs[j + 1]?.t ?? tw.evs[j].t + tw.evs[j].dur) - tw.evs[j].t)) : 0;
+      const yy = n ? pl.y + (frac * PITCH) / PER_TURN : 0;
+      tw.core.scale.y = Math.max(yy, 0.01); tw.core.position.y = yy / 2;
+      tw.ring.position.y += (yy - tw.ring.position.y) * (1 - Math.exp(-dt * 10));
+      const ang = n ? pl.ang : 0;
+      tw.now.position.set(tw.cx + (R + 3.2) * Math.cos(ang), tw.ring.position.y + 0.8, (R + 3.2) * Math.sin(ang));
+      tw.light.position.set(tw.cx + R * Math.cos(ang), tw.ring.position.y + 1, R * Math.sin(ang));
+      const done = S.t >= RACE.agents[tw.a].totalMs;
+      tw.now.element.textContent = done ? 'finished' : n ? tw.evs[j].summary : 'start';
+    }
+    v.controls.autoRotate = S.playing && !reduceMotion;
+    v.controls.autoRotateSpeed = 0.6;
+  }
+  function pick(ray, click, cx, cy) {
+    const hit = ray.intersectObjects(towers.map((t) => t.mesh))[0];
+    hoverEv = hit ? hit.object.userData.evs[hit.instanceId] : null;
+    if (click) { if (hoverEv) showEvent(hoverEv); return; }
+    showTip(cx, cy, hoverEv && evTip(hoverEv));
+  }
+  return { ...v, scene, update, pick, onLeave: () => (hoverEv = null) };
+}
+
+const views3d = { map: buildMap(), helix: buildHelix() };
+
+// pointer -> raycast on the active 3D view
+const ray = new THREE.Raycaster(), ndc = new THREE.Vector2();
+let down = null, pointer = null;
+renderer.domElement.addEventListener('pointerdown', (e) => (down = { x: e.clientX, y: e.clientY }));
+renderer.domElement.addEventListener('pointermove', (e) => (pointer = e));
+renderer.domElement.addEventListener('pointerleave', () => { pointer = null; showTip(0, 0, null); views3d[S.view]?.onLeave(); });
+renderer.domElement.addEventListener('pointerup', (e) => {
+  if (!down || Math.hypot(e.clientX - down.x, e.clientY - down.y) > 4) return;
+  const v = views3d[S.view]; if (!v) return;
+  castFrom(e, v); v.pick(ray, true);
+});
+function castFrom(e, v) {
+  const r = renderer.domElement.getBoundingClientRect();
+  ndc.set(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1);
+  ray.setFromCamera(ndc, v.camera);
+}
+
+// ───────────────────────── view switching, resize, loop ─────────────────────────
+function setView(name) {
+  S.view = name;
+  document.querySelectorAll('#tabs button').forEach((b) => b.setAttribute('aria-selected', String(b.dataset.view === name)));
+  $('main').classList.toggle('full', name === 'lanes');
+  for (const [k, v] of Object.entries(views3d)) { v.controls.enabled = k === name; v.labels.domElement.style.display = k === name ? '' : 'none'; }
+  $('hint').textContent = HINTS[name];
+  if (name === 'lanes') lanesView.reset();
+  showTip(0, 0, null);
+  resize();
+}
+document.querySelectorAll('#tabs button').forEach((b) => (b.onclick = () => setView(b.dataset.view)));
+
+function resize() {
+  const w = stage.clientWidth, h = stage.clientHeight;
+  if (!w || !h) return;
+  renderer.setSize(w, h);
+  for (const v of Object.values(views3d)) { v.camera.aspect = w / h; v.camera.updateProjectionMatrix(); v.labels.setSize(w, h); }
+}
+new ResizeObserver(resize).observe(stage);
+
+addEventListener('keydown', (e) => {
+  if (e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement || e.metaKey || e.ctrlKey) return;
+  if (e.key === ' ') { e.preventDefault(); togglePlay(); }
+  else if (e.key === 'ArrowRight') S.t = toT(Math.min(vTotal(), toV(S.t) + vTotal() * 0.02));
+  else if (e.key === 'ArrowLeft') S.t = toT(Math.max(0, toV(S.t) - vTotal() * 0.02));
+  else if (e.key === 'Escape') closeDetail();
+  else if (['1', '2', '3'].includes(e.key)) setView(['map', 'lanes', 'helix'][e.key - 1]);
+});
+
+let last = performance.now();
+function frame(now) {
+  const dt = Math.min((now - last) / 1000, 0.1); last = now;
+  if (S.playing) {
+    const v = toV(S.t) + dt * 1000 * S.speed; // playback runs in visual time, so idle gaps fly by
+    if (v >= vTotal()) { S.t = maxT; S.playing = false; } else S.t = toT(v);
+  }
+  $('play').textContent = S.playing ? '❚❚' : '▶';
+  $('play').setAttribute('aria-label', S.playing ? 'Pause' : 'Play');
+  $('clock').textContent = `${fmt(S.t)} / ${fmt(maxT)}`;
+  $('scrub').value = (toV(S.t) / vTotal()) * 1000;
+  $('stats').innerHTML = agents.map((a) => {
+    const n = upper(lanes[a], S.t);
+    return `<span style="color:${AGENT_COLOR[a]}">${AGENT_NAME[a]}</span> ${n}/${lanes[a].length}`;
+  }).join('');
+  drawTimeline();
+  const v = views3d[S.view];
+  if (v) {
+    if (pointer && !down) { castFrom(pointer, v); v.pick(ray, false, pointer.clientX, pointer.clientY); }
+    v.update(dt);
+    v.controls.update();
+    renderer.render(v.scene, v.camera);
+    v.labels.render(v.scene, v.camera);
+  }
+  requestAnimationFrame(frame);
+}
+renderer.domElement.addEventListener('pointerup', () => (down = null));
+const hashView = location.hash.match(/view=(\w+)/)?.[1];
+const hashT = Number(location.hash.match(/t=(\d+)/)?.[1]);
+if (hashT) S.t = hashT;
+setView(['map', 'lanes', 'helix'].includes(hashView) ? hashView : 'map');
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>
